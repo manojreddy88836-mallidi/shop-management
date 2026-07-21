@@ -32,7 +32,7 @@ public class CustomerController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<CustomerDTO>> getById(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<CustomerDTO>> getById(@PathVariable String id) {
         return ResponseEntity.ok(ApiResponse.success("Customer found",
                 customerService.getCustomerById(id)));
     }
@@ -45,13 +45,13 @@ public class CustomerController {
 
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<CustomerDTO>> update(
-            @PathVariable Long id, @Valid @RequestBody CustomerDTO dto) {
+            @PathVariable String id, @Valid @RequestBody CustomerDTO dto) {
         return ResponseEntity.ok(ApiResponse.success("Customer updated",
                 customerService.updateCustomer(id, dto)));
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<ApiResponse<Void>> delete(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<Void>> delete(@PathVariable String id) {
         customerService.deleteCustomer(id);
         return ResponseEntity.ok(ApiResponse.success("Customer deleted", null));
     }

@@ -3,15 +3,15 @@ package com.shopmanager.repository;
 import com.shopmanager.entity.Item;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.mongodb.repository.MongoRepository;
+import org.springframework.data.mongodb.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface ItemRepository extends JpaRepository<Item, Long> {
+public interface ItemRepository extends MongoRepository<Item, String> {
 
     boolean existsByItemNameIgnoreCase(String itemName);
 
@@ -25,11 +25,12 @@ public interface ItemRepository extends JpaRepository<Item, Long> {
 
     Page<Item> findByItemNameContainingIgnoreCase(String name, Pageable pageable);
 
-    // Status-filtered pagination (used by Item Management page)
+    // Status-filtered pagination
     Page<Item> findByStatusAndItemNameContainingIgnoreCase(String status, String name, Pageable pageable);
 
     Page<Item> findByCategoryAndStatusAndItemNameContainingIgnoreCase(String category, String status, String name, Pageable pageable);
 
-    @Query("SELECT DISTINCT i.category FROM Item i WHERE i.category IS NOT NULL ORDER BY i.category")
-    List<String> findAllCategories();
+    // Distinct categories — handled in ItemService via MongoTemplate
+    @Query(value = "{status: {$ne: null}}", fields = "{category: 1, _id: 0}")
+    List<Item> findAllForCategories();
 }

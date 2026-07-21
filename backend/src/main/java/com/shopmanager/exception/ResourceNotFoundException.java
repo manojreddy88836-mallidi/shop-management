@@ -5,6 +5,12 @@ public class ResourceNotFoundException extends RuntimeException {
         super(message);
     }
 
+    /** For MongoDB String ObjectId */
+    public ResourceNotFoundException(String resource, String id) {
+        super(resource + " not found with id: " + id);
+    }
+
+    /** Kept for backward compatibility */
     public ResourceNotFoundException(String resource, Long id) {
         super(resource + " not found with id: " + id);
     }

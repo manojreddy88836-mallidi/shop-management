@@ -9,13 +9,12 @@ import com.shopmanager.repository.ItemRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
-@Transactional
 public class ItemService {
 
     private final ItemRepository itemRepository;
@@ -24,13 +23,11 @@ public class ItemService {
         this.itemRepository = itemRepository;
     }
 
-    @Transactional(readOnly = true)
     public List<ItemDTO> searchItems(String query) {
         return itemRepository.findByItemNameContainingIgnoreCaseAndStatus(query, "ACTIVE")
                 .stream().map(this::toDTO).collect(Collectors.toList());
     }
 
-    @Transactional(readOnly = true)
     public PageResponse<ItemDTO> getAllItems(String search, String category, Pageable pageable) {
         Page<Item> page;
         String searchTerm = (search != null) ? search : "";
@@ -46,8 +43,7 @@ public class ItemService {
                 page.getTotalElements(), page.getTotalPages(), page.isLast());
     }
 
-    @Transactional(readOnly = true)
-    public ItemDTO getItemById(Long id) {
+    public ItemDTO getItemById(String id) {
         return toDTO(itemRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Item", id)));
     }
@@ -57,44 +53,53 @@ public class ItemService {
             throw new DuplicateResourceException("Item '" + dto.getItemName() + "' already exists");
         }
         Item item = new Item();
-        item.setItemName(dto.getItemName().trim());          // preserve exact case
+        item.setItemName(dto.getItemName().trim());
         item.setCategory(dto.getCategory() != null ? dto.getCategory().trim().toUpperCase() : null);
         item.setPrice(dto.getPrice());
         item.setStatus(dto.getStatus() != null ? dto.getStatus() : "ACTIVE");
+        item.setCreatedAt(LocalDateTime.now());
+        item.setUpdatedAt(LocalDateTime.now());
         return toDTO(itemRepository.save(item));
     }
 
-    public ItemDTO updateItem(Long id, ItemDTO dto) {
+    public ItemDTO updateItem(String id, ItemDTO dto) {
         Item item = itemRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Item", id));
         if (!item.getItemName().equalsIgnoreCase(dto.getItemName()) &&
                 itemRepository.existsByItemNameIgnoreCase(dto.getItemName())) {
             throw new DuplicateResourceException("Item '" + dto.getItemName() + "' already exists");
         }
-        item.setItemName(dto.getItemName().trim());          // preserve exact case
+        item.setItemName(dto.getItemName().trim());
         item.setCategory(dto.getCategory() != null ? dto.getCategory().trim().toUpperCase() : null);
         item.setPrice(dto.getPrice());
         item.setStatus(dto.getStatus());
+        item.setUpdatedAt(LocalDateTime.now());
         return toDTO(itemRepository.save(item));
     }
 
-    public void softDeleteItem(Long id) {
+    public void softDeleteItem(String id) {
         Item item = itemRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Item", id));
         item.setStatus("DELETED");
+        item.setUpdatedAt(LocalDateTime.now());
         itemRepository.save(item);
     }
 
-    public void restoreItem(Long id) {
+    public void restoreItem(String id) {
         Item item = itemRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Item", id));
         item.setStatus("ACTIVE");
+        item.setUpdatedAt(LocalDateTime.now());
         itemRepository.save(item);
     }
 
-    @Transactional(readOnly = true)
     public List<String> getCategories() {
-        return itemRepository.findAllCategories();
+        return itemRepository.findByStatus("ACTIVE").stream()
+                .map(Item::getCategory)
+                .filter(c -> c != null && !c.isBlank())
+                .distinct()
+                .sorted()
+                .collect(Collectors.toList());
     }
 
     private ItemDTO toDTO(Item item) {

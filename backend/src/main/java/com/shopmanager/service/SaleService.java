@@ -13,15 +13,14 @@ import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
-@Transactional
 public class SaleService {
 
     private static final Logger log = LoggerFactory.getLogger(SaleService.class);
@@ -41,12 +40,15 @@ public class SaleService {
                 .orElseThrow(() -> new ResourceNotFoundException("Item", request.getItemId()));
 
         Sale sale = new Sale();
-        sale.setItem(item);
+        sale.setItemId(item.getId());
+        sale.setItemName(item.getItemName());
+        sale.setCategory(item.getCategory());
         sale.setQuantityKg(request.getQuantityKg());
         sale.setTotalPrice(request.getTotalPrice());
-        // Use user-provided date/time; fall back to now() if absent
         sale.setSaleDate(request.getSaleDate() != null ? request.getSaleDate() : LocalDate.now());
         sale.setSaleTime(request.getSaleTime() != null ? request.getSaleTime() : LocalTime.now());
+        sale.setCreatedAt(LocalDateTime.now());
+        sale.setUpdatedAt(LocalDateTime.now());
 
         Sale saved = saleRepository.save(sale);
         log.info("Sale created: id={}, item='{}', qty={}kg, total=₹{}, date={}",
@@ -57,18 +59,21 @@ public class SaleService {
 
     // ── Update ────────────────────────────────────────────────────────────────
 
-    public SaleDTO updateSale(Long id, SaleRequest request) {
+    public SaleDTO updateSale(String id, SaleRequest request) {
         Sale sale = saleRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Sale", id));
 
         Item item = itemRepository.findById(request.getItemId())
                 .orElseThrow(() -> new ResourceNotFoundException("Item", request.getItemId()));
 
-        sale.setItem(item);
+        sale.setItemId(item.getId());
+        sale.setItemName(item.getItemName());
+        sale.setCategory(item.getCategory());
         sale.setQuantityKg(request.getQuantityKg());
         sale.setTotalPrice(request.getTotalPrice());
         if (request.getSaleDate() != null) sale.setSaleDate(request.getSaleDate());
         if (request.getSaleTime() != null) sale.setSaleTime(request.getSaleTime());
+        sale.setUpdatedAt(LocalDateTime.now());
 
         Sale saved = saleRepository.save(sale);
         log.info("Sale updated: id={}, item='{}', qty={}kg, total=₹{}, date={}",
@@ -79,7 +84,7 @@ public class SaleService {
 
     // ── Delete ────────────────────────────────────────────────────────────────
 
-    public void deleteSale(Long id) {
+    public void deleteSale(String id) {
         if (!saleRepository.existsById(id)) {
             throw new ResourceNotFoundException("Sale", id);
         }
@@ -89,7 +94,6 @@ public class SaleService {
 
     // ── Read ──────────────────────────────────────────────────────────────────
 
-    @Transactional(readOnly = true)
     public PageResponse<SaleDTO> getSales(LocalDate start, LocalDate end, Pageable pageable) {
         Page<Sale> page = saleRepository.findBySaleDateBetween(start, end, pageable);
         List<SaleDTO> content = page.getContent().stream().map(this::toDTO).collect(Collectors.toList());
@@ -97,26 +101,27 @@ public class SaleService {
                 page.getTotalElements(), page.getTotalPages(), page.isLast());
     }
 
-    @Transactional(readOnly = true)
     public PageResponse<SaleDTO> getHistory(LocalDate start, LocalDate end, String search, Pageable pageable) {
-        // Normalize search — empty string treated as null (wildcard)
-        String q = (search != null && !search.trim().isEmpty()) ? search.trim() : null;
-        Page<Sale> page = saleRepository.findHistory(start, end, q, pageable);
+        String q = (search != null && !search.trim().isEmpty()) ? search.trim() : "";
+        Page<Sale> page;
+        if (q.isEmpty()) {
+            page = saleRepository.findBySaleDateBetween(start, end, pageable);
+        } else {
+            page = saleRepository.findBySaleDateBetweenAndItemNameContainingIgnoreCase(
+                    start, end, q, pageable);
+        }
         List<SaleDTO> content = page.getContent().stream().map(this::toDTO).collect(Collectors.toList());
         return new PageResponse<>(content, page.getNumber(), page.getSize(),
                 page.getTotalElements(), page.getTotalPages(), page.isLast());
     }
 
-    @Transactional(readOnly = true)
     public List<SaleDTO> getTodaySales() {
-        return saleRepository.findRecentSalesByDate(LocalDate.now())
-                .stream().map(this::toDTO).collect(Collectors.toList());
+        return getSalesByDate(LocalDate.now());
     }
 
     /** Return all sales for an arbitrary date, ordered by time desc. */
-    @Transactional(readOnly = true)
     public List<SaleDTO> getSalesByDate(LocalDate date) {
-        return saleRepository.findRecentSalesByDate(date)
+        return saleRepository.findBySaleDateOrderBySaleTimeDesc(date)
                 .stream().map(this::toDTO).collect(Collectors.toList());
     }
 
@@ -125,9 +130,9 @@ public class SaleService {
     public SaleDTO toDTO(Sale sale) {
         SaleDTO dto = new SaleDTO();
         dto.setId(sale.getId());
-        dto.setItemId(sale.getItem().getId());
-        dto.setItemName(sale.getItem().getItemName());
-        dto.setCategory(sale.getItem().getCategory());
+        dto.setItemId(sale.getItemId());
+        dto.setItemName(sale.getItemName());
+        dto.setCategory(sale.getCategory());
         dto.setQuantityKg(sale.getQuantityKg());
         dto.setTotalPrice(sale.getTotalPrice());
         dto.setSaleDate(sale.getSaleDate());

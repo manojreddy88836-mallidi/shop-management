@@ -1,8 +1,9 @@
 package com.shopmanager.entity;
 
-import jakarta.persistence.*;
-import org.hibernate.annotations.CreationTimestamp;
-import org.hibernate.annotations.UpdateTimestamp;
+import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.Indexed;
+import org.springframework.data.mongodb.core.mapping.Document;
+import org.springframework.data.mongodb.core.mapping.Field;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -10,65 +11,65 @@ import java.time.LocalDateTime;
 import java.time.LocalTime;
 
 /**
- * Sale entity.
+ * Sale document — stored in the "sales" MongoDB collection.
  *
- * Column mapping:
- *   - quantity_kg  : decimal KG sold
- *   - price        : reused as total_price (user-entered total amount = revenue)
- *   - quantity     : old Integer column stays (unused — data preserved)
- *   - customer_name: old column stays (unused — data preserved)
- *   - discount     : old column stays (unused — data preserved)
- *   - total        : old column stays (unused — data preserved)
- *   - updated_at   : NEW — set on every edit (ddl-auto=update adds it safely)
+ * Denormalized: itemId, itemName and category are stored directly on the sale
+ * document so lookups don't require a join. They are populated at create/update
+ * time from the Item collection.
  */
-@Entity
-@Table(name = "sales")
+@Document(collection = "sales")
 public class Sale {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    private String id;
 
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "item_id", nullable = false)
-    private Item item;
+    /** Reference to Item — stored as String ObjectId */
+    @Field("itemId")
+    private String itemId;
 
-    /**
-     * Quantity in kilograms — supports decimals (e.g. 0.25, 1.5, 25).
-     */
-    @Column(name = "quantity_kg", precision = 10, scale = 3)
+    /** Denormalized for fast display (avoids extra lookup) */
+    @Field("itemName")
+    private String itemName;
+
+    @Field("category")
+    private String category;
+
+    /** Quantity in kilograms — supports decimals (e.g. 0.25, 1.5, 25) */
+    @Field("quantityKg")
     private BigDecimal quantityKg;
 
-    /**
-     * Total price entered by the user — IS the final revenue.
-     * Reuses the existing "price" column.
-     */
-    @Column(name = "price", nullable = false, precision = 10, scale = 2)
+    /** Total price entered by the user (IS the final revenue) */
+    @Field("totalPrice")
     private BigDecimal totalPrice;
 
-    @Column(name = "sale_date", nullable = false)
+    @Indexed
+    @Field("saleDate")
     private LocalDate saleDate;
 
-    @Column(name = "sale_time", nullable = false)
+    @Field("saleTime")
     private LocalTime saleTime;
 
-    @CreationTimestamp
-    @Column(name = "created_at", updatable = false)
+    @Field("createdAt")
     private LocalDateTime createdAt;
 
-    @UpdateTimestamp
-    @Column(name = "updated_at")
+    @Field("updatedAt")
     private LocalDateTime updatedAt;
 
     public Sale() {}
 
-    // ─── Getters / Setters ────────────────────────────────────────────────────
+    // ─── Getters / Setters ─────────────────────────────────────────────────────
 
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
+    public String getId() { return id; }
+    public void setId(String id) { this.id = id; }
 
-    public Item getItem() { return item; }
-    public void setItem(Item item) { this.item = item; }
+    public String getItemId() { return itemId; }
+    public void setItemId(String itemId) { this.itemId = itemId; }
+
+    public String getItemName() { return itemName; }
+    public void setItemName(String itemName) { this.itemName = itemName; }
+
+    public String getCategory() { return category; }
+    public void setCategory(String category) { this.category = category; }
 
     public BigDecimal getQuantityKg() { return quantityKg; }
     public void setQuantityKg(BigDecimal quantityKg) { this.quantityKg = quantityKg; }

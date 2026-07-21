@@ -8,13 +8,12 @@ import com.shopmanager.repository.CustomerRepository;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
-@Transactional
 public class CustomerService {
 
     private final CustomerRepository customerRepository;
@@ -23,7 +22,6 @@ public class CustomerService {
         this.customerRepository = customerRepository;
     }
 
-    @Transactional(readOnly = true)
     public PageResponse<CustomerDTO> getAllCustomers(String search, Pageable pageable) {
         Page<Customer> page = customerRepository.findByNameContainingIgnoreCase(
                 search != null ? search : "", pageable);
@@ -32,8 +30,7 @@ public class CustomerService {
                 page.getTotalElements(), page.getTotalPages(), page.isLast());
     }
 
-    @Transactional(readOnly = true)
-    public CustomerDTO getCustomerById(Long id) {
+    public CustomerDTO getCustomerById(String id) {
         return toDTO(customerRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Customer", id)));
     }
@@ -43,10 +40,11 @@ public class CustomerService {
         customer.setName(dto.getName());
         customer.setPhone(dto.getPhone());
         customer.setAddress(dto.getAddress());
+        customer.setCreatedAt(LocalDateTime.now());
         return toDTO(customerRepository.save(customer));
     }
 
-    public CustomerDTO updateCustomer(Long id, CustomerDTO dto) {
+    public CustomerDTO updateCustomer(String id, CustomerDTO dto) {
         Customer customer = customerRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("Customer", id));
         customer.setName(dto.getName());
@@ -55,7 +53,7 @@ public class CustomerService {
         return toDTO(customerRepository.save(customer));
     }
 
-    public void deleteCustomer(Long id) {
+    public void deleteCustomer(String id) {
         if (!customerRepository.existsById(id)) {
             throw new ResourceNotFoundException("Customer", id);
         }

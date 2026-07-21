@@ -9,7 +9,6 @@ import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.*;
@@ -208,7 +207,6 @@ public class DataInitializer implements CommandLineRunner {
     }
 
     @Override
-    @Transactional
     public void run(String... args) {
         initAdmin();
         syncItems();
@@ -242,7 +240,6 @@ public class DataInitializer implements CommandLineRunner {
     // ─────────────────────────────────────────────────────────────────────────
     // Item master sync — idempotent, runs every startup
     // ─────────────────────────────────────────────────────────────────────────
-    @Transactional
     protected void syncItems() {
         int renamed    = applyRenames();
         int inserted   = insertMissingItems();

@@ -39,7 +39,7 @@ public class SaleController {
 
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<SaleDTO>> updateSale(
-            @PathVariable Long id,
+            @PathVariable String id,
             @Valid @RequestBody SaleRequest request) {
         return ResponseEntity.ok(ApiResponse.success("Sale updated", saleService.updateSale(id, request)));
     }
@@ -47,7 +47,7 @@ public class SaleController {
     // ── Delete ────────────────────────────────────────────────────────────────
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<ApiResponse<Void>> deleteSale(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<Void>> deleteSale(@PathVariable String id) {
         saleService.deleteSale(id);
         return ResponseEntity.ok(ApiResponse.success("Sale deleted", null));
     }

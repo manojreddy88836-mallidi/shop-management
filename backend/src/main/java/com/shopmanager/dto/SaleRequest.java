@@ -17,7 +17,7 @@ import java.time.LocalTime;
 public class SaleRequest {
 
     @NotNull(message = "Item ID is required")
-    private Long itemId;
+    private String itemId;
 
     @NotNull(message = "Quantity (KG) is required")
     @DecimalMin(value = "0.001", message = "Quantity must be greater than 0")
@@ -35,8 +35,8 @@ public class SaleRequest {
 
     public SaleRequest() {}
 
-    public Long getItemId() { return itemId; }
-    public void setItemId(Long itemId) { this.itemId = itemId; }
+    public String getItemId() { return itemId; }
+    public void setItemId(String itemId) { this.itemId = itemId; }
 
     public BigDecimal getQuantityKg() { return quantityKg; }
     public void setQuantityKg(BigDecimal quantityKg) { this.quantityKg = quantityKg; }

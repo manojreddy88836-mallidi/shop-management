@@ -3,27 +3,24 @@ package com.shopmanager.service;
 import com.shopmanager.dto.DashboardDTO;
 import com.shopmanager.dto.ReportItemDTO;
 import com.shopmanager.dto.SaleDTO;
-import com.shopmanager.repository.SaleRepository;
+import com.shopmanager.repository.SaleAggregationRepository;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
-import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-import java.time.temporal.TemporalAdjusters;
 import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
-@Transactional(readOnly = true)
 public class DashboardService {
 
-    private final SaleRepository saleRepository;
+    private final SaleAggregationRepository saleAggregationRepository;
     private final SaleService saleService;
 
-    public DashboardService(SaleRepository saleRepository, SaleService saleService) {
-        this.saleRepository = saleRepository;
+    public DashboardService(SaleAggregationRepository saleAggregationRepository,
+                            SaleService saleService) {
+        this.saleAggregationRepository = saleAggregationRepository;
         this.saleService = saleService;
     }
 
@@ -37,20 +34,14 @@ public class DashboardService {
     public DashboardDTO getStatsForRange(LocalDate start, LocalDate end, String label) {
 
         // ── Aggregates ────────────────────────────────────────────────────────
-        BigDecimal revenue      = saleRepository.sumTotalBetween(start, end).orElse(BigDecimal.ZERO);
-        BigDecimal kgSold       = saleRepository.sumQuantityKgBetween(start, end).orElse(BigDecimal.ZERO);
-        Long transactions       = saleRepository.countBetween(start, end);
+        BigDecimal revenue      = saleAggregationRepository.sumTotalBetween(start, end).orElse(BigDecimal.ZERO);
+        BigDecimal kgSold       = saleAggregationRepository.sumQuantityKgBetween(start, end).orElse(BigDecimal.ZERO);
+        Long transactions       = saleAggregationRepository.countBetween(start, end);
 
         // ── Top items (KG) ────────────────────────────────────────────────────
-        List<Object[]> rawItems = saleRepository.findTopItemsBetween(start, end);
-        List<ReportItemDTO> topItems = rawItems.stream().map(r -> new ReportItemDTO(
-                (String) r[0],
-                (BigDecimal) r[1],
-                ((Number) r[2]).longValue(),
-                (BigDecimal) r[3]
-        )).collect(Collectors.toList());
+        List<ReportItemDTO> topItems = saleAggregationRepository.findTopItemsBetween(start, end);
 
-        // ── Most sold by KG (index 0 = highest KG since ORDER BY qty DESC) ───
+        // ── Most sold by KG ───────────────────────────────────────────────────
         String mostSoldItem = topItems.isEmpty() ? "N/A" : topItems.get(0).getItemName();
 
         // ── Highest revenue item ──────────────────────────────────────────────

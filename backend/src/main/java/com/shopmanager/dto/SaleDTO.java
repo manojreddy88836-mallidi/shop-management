@@ -13,8 +13,8 @@ import java.time.LocalTime;
  */
 public class SaleDTO {
 
-    private Long id;
-    private Long itemId;
+    private String id;
+    private String itemId;
     private String itemName;
     private String category;
     private BigDecimal quantityKg;
@@ -26,11 +26,11 @@ public class SaleDTO {
 
     public SaleDTO() {}
 
-    public Long getId() { return id; }
-    public void setId(Long id) { this.id = id; }
+    public String getId() { return id; }
+    public void setId(String id) { this.id = id; }
 
-    public Long getItemId() { return itemId; }
-    public void setItemId(Long itemId) { this.itemId = itemId; }
+    public String getItemId() { return itemId; }
+    public void setItemId(String itemId) { this.itemId = itemId; }
 
     public String getItemName() { return itemName; }
     public void setItemName(String itemName) { this.itemName = itemName; }

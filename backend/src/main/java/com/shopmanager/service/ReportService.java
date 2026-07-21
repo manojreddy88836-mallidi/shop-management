@@ -1,35 +1,25 @@
 package com.shopmanager.service;
 
 import com.shopmanager.dto.ReportItemDTO;
-import com.shopmanager.repository.SaleRepository;
+import com.shopmanager.repository.SaleAggregationRepository;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.temporal.TemporalAdjusters;
 import java.util.List;
-import java.util.stream.Collectors;
 
 @Service
-@Transactional(readOnly = true)
 public class ReportService {
 
-    private final SaleRepository saleRepository;
+    private final SaleAggregationRepository saleAggregationRepository;
 
-    public ReportService(SaleRepository saleRepository) {
-        this.saleRepository = saleRepository;
+    public ReportService(SaleAggregationRepository saleAggregationRepository) {
+        this.saleAggregationRepository = saleAggregationRepository;
     }
 
     public List<ReportItemDTO> getReport(LocalDate start, LocalDate end) {
-        List<Object[]> rows = saleRepository.findReportBetween(start, end);
-        return rows.stream().map(r -> new ReportItemDTO(
-                (String)  r[0],                           // itemName
-                (BigDecimal) r[1],                        // totalKg (SUM quantityKg)
-                ((Number) r[2]).longValue(),               // transactions (COUNT)
-                (BigDecimal) r[3]                         // revenue (SUM totalPrice)
-        )).collect(Collectors.toList());
+        return saleAggregationRepository.findReportBetween(start, end);
     }
 
     public List<ReportItemDTO> getDailyReport(LocalDate date) {

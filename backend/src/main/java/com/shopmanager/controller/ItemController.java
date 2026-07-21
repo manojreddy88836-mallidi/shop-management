@@ -52,7 +52,7 @@ public class ItemController {
     }
 
     @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<ItemDTO>> getItem(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<ItemDTO>> getItem(@PathVariable String id) {
         return ResponseEntity.ok(ApiResponse.success("Item found", itemService.getItemById(id)));
     }
 
@@ -64,18 +64,18 @@ public class ItemController {
 
     @PutMapping("/{id}")
     public ResponseEntity<ApiResponse<ItemDTO>> updateItem(
-            @PathVariable Long id, @Valid @RequestBody ItemDTO dto) {
+            @PathVariable String id, @Valid @RequestBody ItemDTO dto) {
         return ResponseEntity.ok(ApiResponse.success("Item updated", itemService.updateItem(id, dto)));
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<ApiResponse<Void>> deleteItem(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<Void>> deleteItem(@PathVariable String id) {
         itemService.softDeleteItem(id);
         return ResponseEntity.ok(ApiResponse.success("Item deleted", null));
     }
 
     @PatchMapping("/{id}/restore")
-    public ResponseEntity<ApiResponse<Void>> restoreItem(@PathVariable Long id) {
+    public ResponseEntity<ApiResponse<Void>> restoreItem(@PathVariable String id) {
         itemService.restoreItem(id);
         return ResponseEntity.ok(ApiResponse.success("Item restored", null));
     }
