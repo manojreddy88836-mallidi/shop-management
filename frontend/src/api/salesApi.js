@@ -38,5 +38,11 @@ export const salesApi = {
 
   /** Today's sales only (kept for backward compat) */
   getToday: () => axiosInstance.get('/api/sales/today'),
+
+  /**
+   * Bulk delete sales by IDs.
+   * @param {string[]} ids - array of sale ObjectId strings
+   */
+  bulkDelete: (ids) => axiosInstance.delete('/api/sales/bulk', { data: { ids } }),
 }
 

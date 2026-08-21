@@ -100,6 +100,20 @@ public class SaleService {
         log.info("Sale deleted: id={}", id);
     }
 
+    /**
+     * Bulk delete — only deletes IDs that actually exist.
+     * Non-existent IDs are silently skipped (safe).
+     * @return number of records actually deleted
+     */
+    public int bulkDelete(java.util.List<String> ids) {
+        if (ids == null || ids.isEmpty()) return 0;
+        java.util.List<String> unique = ids.stream().distinct().collect(Collectors.toList());
+        java.util.List<Sale> existing = saleRepository.findAllById(unique);
+        saleRepository.deleteAll(existing);
+        log.info("Bulk delete: requested={}, deleted={}", unique.size(), existing.size());
+        return existing.size();
+    }
+
     // ── Read — use MongoTemplate for date-range queries ───────────────────────
     // Derived query methods (findBySaleDateBetween) have a LocalDate type
     // conversion inconsistency in Spring Data MongoDB. MongoTemplate Criteria

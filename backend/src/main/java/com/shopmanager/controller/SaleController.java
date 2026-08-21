@@ -52,6 +52,29 @@ public class SaleController {
         return ResponseEntity.ok(ApiResponse.success("Sale deleted", null));
     }
 
+    // ── Bulk Delete ───────────────────────────────────────────────────────────
+
+    public static class BulkDeleteRequest {
+        private java.util.List<String> ids;
+        public java.util.List<String> getIds() { return ids; }
+        public void setIds(java.util.List<String> ids) { this.ids = ids; }
+    }
+
+    @DeleteMapping("/bulk")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> bulkDelete(
+            @RequestBody BulkDeleteRequest request) {
+        if (request == null || request.getIds() == null || request.getIds().isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error("No IDs provided for bulk delete"));
+        }
+        int deleted = saleService.bulkDelete(request.getIds());
+        java.util.Map<String, Object> result = new java.util.HashMap<>();
+        result.put("deleted", deleted);
+        result.put("requested", request.getIds().size());
+        return ResponseEntity.ok(ApiResponse.success(
+                deleted + " sale(s) deleted successfully", result));
+    }
+
     // ── Paginated list (date range) ───────────────────────────────────────────
 
     @GetMapping
