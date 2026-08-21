@@ -22,7 +22,7 @@ services:
   # Spring Boot Backend
   backend:
     platform: linux/amd64
-    image: charanteja1694/shop-management-backend:latest
+    image: manojreddy88836/shop-management-backend:latest
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -51,7 +51,7 @@ services:
   # React Frontend
   frontend:
     platform: linux/amd64
-    image: charanteja1694/shop-management-frontend:latest
+    image: manojreddy88836/shop-management-frontend:latest
     build:
       context: ./frontend
       dockerfile: Dockerfile
