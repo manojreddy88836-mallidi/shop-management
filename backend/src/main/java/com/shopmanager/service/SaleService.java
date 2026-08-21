@@ -11,7 +11,11 @@ import com.shopmanager.repository.SaleRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
@@ -27,10 +31,14 @@ public class SaleService {
 
     private final SaleRepository saleRepository;
     private final ItemRepository itemRepository;
+    private final MongoTemplate mongoTemplate;
 
-    public SaleService(SaleRepository saleRepository, ItemRepository itemRepository) {
+    public SaleService(SaleRepository saleRepository,
+                       ItemRepository itemRepository,
+                       MongoTemplate mongoTemplate) {
         this.saleRepository = saleRepository;
         this.itemRepository = itemRepository;
+        this.mongoTemplate  = mongoTemplate;
     }
 
     // ── Create ────────────────────────────────────────────────────────────────
@@ -92,27 +100,45 @@ public class SaleService {
         log.info("Sale deleted: id={}", id);
     }
 
-    // ── Read ──────────────────────────────────────────────────────────────────
+    // ── Read — use MongoTemplate for date-range queries ───────────────────────
+    // Derived query methods (findBySaleDateBetween) have a LocalDate type
+    // conversion inconsistency in Spring Data MongoDB. MongoTemplate Criteria
+    // uses the same conversion as the aggregation pipeline (which works).
 
     public PageResponse<SaleDTO> getSales(LocalDate start, LocalDate end, Pageable pageable) {
-        Page<Sale> page = saleRepository.findBySaleDateBetween(start, end, pageable);
+        Page<Sale> page = findByDateRange(start, end, null, pageable);
         List<SaleDTO> content = page.getContent().stream().map(this::toDTO).collect(Collectors.toList());
         return new PageResponse<>(content, page.getNumber(), page.getSize(),
                 page.getTotalElements(), page.getTotalPages(), page.isLast());
     }
 
     public PageResponse<SaleDTO> getHistory(LocalDate start, LocalDate end, String search, Pageable pageable) {
-        String q = (search != null && !search.trim().isEmpty()) ? search.trim() : "";
-        Page<Sale> page;
-        if (q.isEmpty()) {
-            page = saleRepository.findBySaleDateBetween(start, end, pageable);
-        } else {
-            page = saleRepository.findBySaleDateBetweenAndItemNameContainingIgnoreCase(
-                    start, end, q, pageable);
-        }
+        String q = (search != null && !search.trim().isEmpty()) ? search.trim() : null;
+        Page<Sale> page = findByDateRange(start, end, q, pageable);
         List<SaleDTO> content = page.getContent().stream().map(this::toDTO).collect(Collectors.toList());
         return new PageResponse<>(content, page.getNumber(), page.getSize(),
                 page.getTotalElements(), page.getTotalPages(), page.isLast());
+    }
+
+    /**
+     * Core date-range query using MongoTemplate so the same LocalDate→Date
+     * conversion is applied consistently (matching the aggregation pipeline).
+     */
+    private Page<Sale> findByDateRange(LocalDate start, LocalDate end,
+                                        String itemNameSearch, Pageable pageable) {
+        Criteria criteria = Criteria.where("saleDate").gte(start).lte(end);
+        if (itemNameSearch != null && !itemNameSearch.isEmpty()) {
+            criteria = criteria.and("itemName")
+                    .regex(itemNameSearch, "i"); // case-insensitive
+        }
+
+        Query countQuery = new Query(criteria);
+        long total = mongoTemplate.count(countQuery, Sale.class);
+
+        Query dataQuery = new Query(criteria).with(pageable);
+        List<Sale> sales = mongoTemplate.find(dataQuery, Sale.class);
+
+        return new PageImpl<>(sales, pageable, total);
     }
 
     public List<SaleDTO> getTodaySales() {
