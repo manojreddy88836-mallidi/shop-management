@@ -5,14 +5,15 @@ import jakarta.validation.constraints.NotNull;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
-import java.time.LocalTime;
 
 /**
  * Request body for creating or updating a sale.
  * - quantityKg : decimal KG amount
  * - totalPrice : user-entered total — IS the final revenue
  * - saleDate   : optional; defaults to today if null
- * - saleTime   : optional; defaults to now if null
+ *
+ * Note: saleTime has been removed from the UI and is no longer accepted.
+ * Existing sale documents in MongoDB that have a saleTime field are unaffected.
  */
 public class SaleRequest {
 
@@ -30,9 +31,6 @@ public class SaleRequest {
     /** Optional — if null, backend defaults to LocalDate.now() */
     private LocalDate saleDate;
 
-    /** Optional — if null, backend defaults to LocalTime.now() */
-    private LocalTime saleTime;
-
     public SaleRequest() {}
 
     public String getItemId() { return itemId; }
@@ -46,7 +44,4 @@ public class SaleRequest {
 
     public LocalDate getSaleDate() { return saleDate; }
     public void setSaleDate(LocalDate saleDate) { this.saleDate = saleDate; }
-
-    public LocalTime getSaleTime() { return saleTime; }
-    public void setSaleTime(LocalTime saleTime) { this.saleTime = saleTime; }
 }

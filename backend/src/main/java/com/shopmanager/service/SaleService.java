@@ -20,7 +20,7 @@ import org.springframework.stereotype.Service;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.LocalTime;
+
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -54,7 +54,7 @@ public class SaleService {
         sale.setQuantityKg(request.getQuantityKg());
         sale.setTotalPrice(request.getTotalPrice());
         sale.setSaleDate(request.getSaleDate() != null ? request.getSaleDate() : LocalDate.now());
-        sale.setSaleTime(request.getSaleTime() != null ? request.getSaleTime() : LocalTime.now());
+        // saleTime removed — no longer collected or stored
         sale.setCreatedAt(LocalDateTime.now());
         sale.setUpdatedAt(LocalDateTime.now());
 
@@ -80,7 +80,7 @@ public class SaleService {
         sale.setQuantityKg(request.getQuantityKg());
         sale.setTotalPrice(request.getTotalPrice());
         if (request.getSaleDate() != null) sale.setSaleDate(request.getSaleDate());
-        if (request.getSaleTime() != null) sale.setSaleTime(request.getSaleTime());
+        // saleTime intentionally not updated — field removed from UI
         sale.setUpdatedAt(LocalDateTime.now());
 
         Sale saved = saleRepository.save(sale);

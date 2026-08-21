@@ -18,7 +18,6 @@ import { itemsApi } from '../api/itemsApi'
 const EMPTY_EDIT = {
   item: null, quantityKg: '', totalPrice: '',
   saleDate: dayjs().format('YYYY-MM-DD'),
-  saleTime: dayjs().format('HH:mm'),
 }
 
 export default function SalesHistoryPage() {
@@ -38,9 +37,8 @@ export default function SalesHistoryPage() {
   const [loading,     setLoading]     = useState(false)
 
   // ── Selection ─────────────────────────────────────────────────────────────
-  const [selected,    setSelected]    = useState(new Set())   // Set of sale IDs
+  const [selected,    setSelected]    = useState(new Set())
 
-  // Derived selection state
   const allOnPageSelected  = sales.length > 0 && sales.every(s => selected.has(s.id))
   const someOnPageSelected = sales.some(s => selected.has(s.id)) && !allOnPageSelected
   const selectedCount      = selected.size
@@ -65,7 +63,7 @@ export default function SalesHistoryPage() {
   // ── Fetch history ─────────────────────────────────────────────────────────
   const fetchHistory = useCallback(async (p = page) => {
     setLoading(true)
-    setSelected(new Set())   // clear stale selections on every fetch
+    setSelected(new Set())
     try {
       const res = await salesApi.getHistory({
         start: fromDate, end: toDate,
@@ -101,14 +99,12 @@ export default function SalesHistoryPage() {
 
   const toggleSelectAll = () => {
     if (allOnPageSelected) {
-      // Deselect all rows on this page
       setSelected(prev => {
         const next = new Set(prev)
         sales.forEach(s => next.delete(s.id))
         return next
       })
     } else {
-      // Select all rows on this page
       setSelected(prev => {
         const next = new Set(prev)
         sales.forEach(s => next.add(s.id))
@@ -139,7 +135,6 @@ export default function SalesHistoryPage() {
       quantityKg: String(sale.quantityKg || ''),
       totalPrice: String(sale.totalPrice || ''),
       saleDate: sale.saleDate || dayjs().format('YYYY-MM-DD'),
-      saleTime: sale.saleTime?.substring(0, 5) || dayjs().format('HH:mm'),
     })
     setItemOptions([{ id: sale.itemId, itemName: sale.itemName, category: sale.category }])
     setEditDialog(true)
@@ -156,7 +151,6 @@ export default function SalesHistoryPage() {
         quantityKg: Number(editForm.quantityKg),
         totalPrice: Number(editForm.totalPrice),
         saleDate:   editForm.saleDate,
-        saleTime:   editForm.saleTime ? `${editForm.saleTime}:00` : null,
       })
       enqueueSnackbar('✓ Sale updated', { variant: 'success' })
       setEditDialog(false)
@@ -173,7 +167,6 @@ export default function SalesHistoryPage() {
     try {
       await salesApi.delete(deleteDialog.id)
       enqueueSnackbar('✓ Sale deleted', { variant: 'success' })
-      // Also remove from selection if it was selected
       setSelected(prev => { const n = new Set(prev); n.delete(deleteDialog.id); return n })
       setDeleteDialog({ open: false, id: null, name: '' })
       fetchHistory(page)
@@ -215,7 +208,6 @@ export default function SalesHistoryPage() {
             {totalItems > 0 && (
               <Chip label={`${totalItems} records`} size="small" color="primary" sx={{ ml: 1 }} />
             )}
-            {/* ── Delete Selected button ── */}
             {selectedCount > 0 && (
               <Button
                 variant="contained"
@@ -227,9 +219,6 @@ export default function SalesHistoryPage() {
               >
                 Delete Selected ({selectedCount})
               </Button>
-            )}
-            {selectedCount === 0 && totalItems > 0 && (
-              <Box sx={{ ml: 'auto' }} /> /* spacer */
             )}
           </Box>
 
@@ -296,7 +285,6 @@ export default function SalesHistoryPage() {
                 <Table size="small" stickyHeader>
                   <TableHead>
                     <TableRow>
-                      {/* ── Select All checkbox ── */}
                       <TableCell padding="checkbox" sx={{ width: 42 }}>
                         <Tooltip title={allOnPageSelected ? 'Deselect all on page' : 'Select all on page'}>
                           <Checkbox
@@ -310,7 +298,6 @@ export default function SalesHistoryPage() {
                       </TableCell>
                       <TableCell sx={{ fontWeight: 700, width: 36 }}>#</TableCell>
                       <TableCell sx={{ fontWeight: 700 }}>Date</TableCell>
-                      <TableCell sx={{ fontWeight: 700 }}>Time</TableCell>
                       <TableCell sx={{ fontWeight: 700 }}>Item</TableCell>
                       <TableCell sx={{ fontWeight: 700 }} align="center">Qty KG</TableCell>
                       <TableCell sx={{ fontWeight: 700 }} align="right">Revenue</TableCell>
@@ -330,7 +317,6 @@ export default function SalesHistoryPage() {
                             '&:hover': { bgcolor: 'rgba(211, 47, 47, 0.12)' }
                           } : {}}
                         >
-                          {/* ── Row checkbox ── */}
                           <TableCell padding="checkbox">
                             <Checkbox
                               size="small"
@@ -344,11 +330,6 @@ export default function SalesHistoryPage() {
                           </TableCell>
                           <TableCell>
                             <Typography variant="body2">{s.saleDate}</Typography>
-                          </TableCell>
-                          <TableCell>
-                            <Typography variant="caption" color="text.secondary">
-                              {s.saleTime?.substring(0, 5) || '—'}
-                            </Typography>
                           </TableCell>
                           <TableCell>
                             <Typography variant="body2" fontWeight={600}>{s.itemName}</Typography>
@@ -410,7 +391,7 @@ export default function SalesHistoryPage() {
       {/* ── Edit Dialog ── */}
       <Dialog open={editDialog} onClose={() => setEditDialog(false)} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Edit color="warning" /> Edit Sale #{editId}
+          <Edit color="warning" /> Edit Sale
         </DialogTitle>
         <DialogContent sx={{ pt: 2 }}>
           <Stack spacing={2.5} sx={{ mt: 1 }}>
@@ -465,19 +446,11 @@ export default function SalesHistoryPage() {
                   InputProps={{ startAdornment: <InputAdornment position="start">₹</InputAdornment> }}
                 />
               </Grid>
-              <Grid item xs={6}>
+              <Grid item xs={12}>
                 <TextField
                   label="Sale Date" type="date" fullWidth
                   value={editForm.saleDate}
                   onChange={(e) => setEditForm(f => ({ ...f, saleDate: e.target.value }))}
-                  InputLabelProps={{ shrink: true }}
-                />
-              </Grid>
-              <Grid item xs={6}>
-                <TextField
-                  label="Sale Time" type="time" fullWidth
-                  value={editForm.saleTime}
-                  onChange={(e) => setEditForm(f => ({ ...f, saleTime: e.target.value }))}
                   InputLabelProps={{ shrink: true }}
                 />
               </Grid>
@@ -546,11 +519,7 @@ export default function SalesHistoryPage() {
           </Typography>
         </DialogContent>
         <DialogActions sx={{ p: 2, gap: 1 }}>
-          <Button
-            onClick={() => setBulkDialog(false)}
-            variant="outlined"
-            disabled={bulkDeleting}
-          >
+          <Button onClick={() => setBulkDialog(false)} variant="outlined" disabled={bulkDeleting}>
             Cancel
           </Button>
           <Button

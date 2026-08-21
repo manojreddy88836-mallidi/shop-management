@@ -30,7 +30,6 @@ const EMPTY_FORM = {
   quantityKg: '',
   totalPrice: '',
   saleDate:   dayjs().format('YYYY-MM-DD'),
-  saleTime:   dayjs().format('HH:mm'),
 }
 
 export default function SalesPage() {
@@ -41,7 +40,7 @@ export default function SalesPage() {
 
   // ─── Form state ───────────────────────────────────────────────────────────
   const [form, setForm]               = useState(EMPTY_FORM)
-  const [editId, setEditId]           = useState(null)   // null = create, number = edit
+  const [editId, setEditId]           = useState(null)   // null = create, string = edit
   const [itemOptions, setItemOptions] = useState([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [saving, setSaving]           = useState(false)
@@ -108,7 +107,6 @@ export default function SalesPage() {
       quantityKg: String(sale.quantityKg || ''),
       totalPrice: String(sale.totalPrice || ''),
       saleDate:   sale.saleDate || selectedDate,
-      saleTime:   sale.saleTime?.substring(0, 5) || dayjs().format('HH:mm'),
     })
     setItemOptions([{ id: sale.itemId, itemName: sale.itemName, category: sale.category }])
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -116,7 +114,7 @@ export default function SalesPage() {
 
   const handleCancelEdit = () => {
     setEditId(null)
-    setForm({ ...EMPTY_FORM, saleDate: selectedDate, saleTime: dayjs().format('HH:mm') })
+    setForm({ ...EMPTY_FORM, saleDate: selectedDate })
     setItemOptions([])
   }
 
@@ -130,7 +128,7 @@ export default function SalesPage() {
       await salesApi.delete(deleteDialog.id)
       enqueueSnackbar('✓ Sale deleted', { variant: 'success' })
       setDeleteDialog({ open: false, id: null, name: '' })
-      fetchSalesByDate(selectedDate)          // refresh for selected date
+      fetchSalesByDate(selectedDate)
     } catch (err) {
       enqueueSnackbar(err.response?.data?.message || 'Delete failed', { variant: 'error' })
     }
@@ -164,7 +162,6 @@ export default function SalesPage() {
       quantityKg: Number(form.quantityKg),
       totalPrice: Number(form.totalPrice),
       saleDate:   form.saleDate,
-      saleTime:   form.saleTime ? `${form.saleTime}:00` : null,
     }
 
     setSaving(true)
@@ -177,12 +174,11 @@ export default function SalesPage() {
         await salesApi.create(payload)
         enqueueSnackbar('✓ Sale recorded successfully!', { variant: 'success' })
       }
-      // Reset form — keep same sale date as the form's selected date
-      setForm({ ...EMPTY_FORM, saleDate: form.saleDate, saleTime: dayjs().format('HH:mm') })
+      // Reset form — keep same sale date
+      setForm({ ...EMPTY_FORM, saleDate: form.saleDate })
       setItemOptions([])
-      // Refresh table for the saved sale's date so it immediately appears
+      // Refresh table for the saved sale's date
       fetchSalesByDate(form.saleDate)
-      // If sale was for a different date than table, also update the table view
       if (form.saleDate !== selectedDate) {
         setSelectedDate(form.saleDate)
       }
@@ -199,7 +195,6 @@ export default function SalesPage() {
   const totalKg       = sales.reduce((s, r) => s + Number(r.quantityKg  || 0), 0)
   const totalRecords  = sales.length
 
-  // is the selected date today?
   const isToday = selectedDate === dayjs().format('YYYY-MM-DD')
 
   // ─── UI ───────────────────────────────────────────────────────────────────
@@ -303,30 +298,15 @@ export default function SalesPage() {
                     </Grid>
                   </Grid>
 
-                  {/* Sale Date + Sale Time (stored in DB, not shown in table) */}
-                  <Grid container spacing={2}>
-                    <Grid item xs={6}>
-                      <TextField
-                        label="Sale Date *"
-                        type="date"
-                        fullWidth
-                        value={form.saleDate}
-                        onChange={(e) => setForm(f => ({ ...f, saleDate: e.target.value }))}
-                        InputLabelProps={{ shrink: true }}
-                      />
-                    </Grid>
-                    <Grid item xs={6}>
-                      <TextField
-                        label="Sale Time"
-                        type="time"
-                        fullWidth
-                        value={form.saleTime}
-                        onChange={(e) => setForm(f => ({ ...f, saleTime: e.target.value }))}
-                        InputLabelProps={{ shrink: true }}
-                        helperText="Stored internally"
-                      />
-                    </Grid>
-                  </Grid>
+                  {/* Sale Date — full width now that time is removed */}
+                  <TextField
+                    label="Sale Date *"
+                    type="date"
+                    fullWidth
+                    value={form.saleDate}
+                    onChange={(e) => setForm(f => ({ ...f, saleDate: e.target.value }))}
+                    InputLabelProps={{ shrink: true }}
+                  />
 
                   {/* Total Amount display */}
                   <Box sx={{
@@ -514,7 +494,6 @@ export default function SalesPage() {
                 <Table size="small" stickyHeader>
                   <TableHead>
                     <TableRow>
-                      {/* CHANGE 1: removed "Date / Time" — only show "Sale Date" */}
                       <TableCell sx={{ fontWeight: 700, width: 30 }}>#</TableCell>
                       <TableCell sx={{ fontWeight: 700 }}>Item</TableCell>
                       <TableCell sx={{ fontWeight: 700 }} align="center">Qty (KG)</TableCell>
@@ -575,7 +554,6 @@ export default function SalesPage() {
                               {fmt(s.totalPrice)}
                             </Typography>
                           </TableCell>
-                          {/* CHANGE 1: Only date shown — time hidden from UI */}
                           <TableCell align="center">
                             <Typography variant="body2" color="text.secondary">
                               {s.saleDate}
