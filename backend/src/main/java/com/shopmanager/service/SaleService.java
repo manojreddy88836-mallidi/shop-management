@@ -135,33 +135,49 @@ public class SaleService {
     }
 
     /**
-     * Core date-range query using MongoTemplate so the same LocalDate→Date
-     * conversion is applied consistently (matching the aggregation pipeline).
+     * Core date-range query using MongoTemplate.
+     *
+     * Sort: createdAt ASC → id ASC
+     * Rationale: createdAt is set to LocalDateTime.now() at insert time and
+     * never updated on edit. id (MongoDB ObjectId) encodes the insertion
+     * instant in its first 4 bytes, giving a deterministic tiebreaker when
+     * two records share the same createdAt millisecond.
+     * Together they guarantee records are always returned in exact entry order.
      */
     private Page<Sale> findByDateRange(LocalDate start, LocalDate end,
                                         String itemNameSearch, Pageable pageable) {
         Criteria criteria = Criteria.where("saleDate").gte(start).lte(end);
         if (itemNameSearch != null && !itemNameSearch.isEmpty()) {
-            criteria = criteria.and("itemName")
-                    .regex(itemNameSearch, "i"); // case-insensitive
+            criteria = criteria.and("itemName").regex(itemNameSearch, "i");
         }
+
+        // Always override the caller's sort with entry order
+        org.springframework.data.domain.Sort entryOrder =
+                org.springframework.data.domain.Sort.by("createdAt").ascending()
+                        .and(org.springframework.data.domain.Sort.by("id").ascending());
+
+        Pageable orderedPageable = org.springframework.data.domain.PageRequest.of(
+                pageable.getPageNumber(), pageable.getPageSize(), entryOrder);
 
         Query countQuery = new Query(criteria);
         long total = mongoTemplate.count(countQuery, Sale.class);
 
-        Query dataQuery = new Query(criteria).with(pageable);
+        Query dataQuery = new Query(criteria).with(orderedPageable);
         List<Sale> sales = mongoTemplate.find(dataQuery, Sale.class);
 
-        return new PageImpl<>(sales, pageable, total);
+        return new PageImpl<>(sales, orderedPageable, total);
     }
 
     public List<SaleDTO> getTodaySales() {
         return getSalesByDate(LocalDate.now());
     }
 
-    /** Return all sales for an arbitrary date, ordered by time desc. */
+    /**
+     * Return all sales for a specific date in exact entry order:
+     * createdAt ASC, id ASC.
+     */
     public List<SaleDTO> getSalesByDate(LocalDate date) {
-        return saleRepository.findBySaleDateOrderBySaleTimeDesc(date)
+        return saleRepository.findBySaleDateOrderByCreatedAtAscIdAsc(date)
                 .stream().map(this::toDTO).collect(Collectors.toList());
     }
 

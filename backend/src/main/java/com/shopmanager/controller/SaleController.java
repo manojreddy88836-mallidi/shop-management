@@ -8,7 +8,7 @@ import com.shopmanager.service.SaleService;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
+
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -87,8 +87,8 @@ public class SaleController {
         if (start == null) start = LocalDate.now().minusMonths(1);
         if (end == null)   end   = LocalDate.now();
 
-        Pageable pageable = PageRequest.of(page, size,
-                Sort.by("saleDate").descending().and(Sort.by("saleTime").descending()));
+        // Sort is enforced inside SaleService.findByDateRange (createdAt ASC, id ASC)
+        Pageable pageable = PageRequest.of(page, size);
         return ResponseEntity.ok(ApiResponse.success("Sales fetched",
                 saleService.getSales(start, end, pageable)));
     }
@@ -106,6 +106,7 @@ public class SaleController {
         if (start == null) start = LocalDate.now().minusMonths(3);
         if (end == null)   end   = LocalDate.now();
 
+        // Sort is enforced inside SaleService.findByDateRange (createdAt ASC, id ASC)
         Pageable pageable = PageRequest.of(page, size);
         return ResponseEntity.ok(ApiResponse.success("Sales history",
                 saleService.getHistory(start, end, search, pageable)));
