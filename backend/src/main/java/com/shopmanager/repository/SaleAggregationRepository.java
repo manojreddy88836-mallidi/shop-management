@@ -12,8 +12,9 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * MongoDB aggregation pipeline replacements for the JPQL aggregate queries
- * that were in SaleRepository. Uses MongoTemplate directly.
+ * MongoDB aggregation pipeline replacements for the JPQL aggregate queries.
+ * Uses $toDouble conversion to handle both String (legacy) and Decimal128
+ * (new MongoConfig) storage of BigDecimal fields.
  */
 @Repository
 public class SaleAggregationRepository {
@@ -33,13 +34,19 @@ public class SaleAggregationRepository {
     public Optional<BigDecimal> sumTotalBetween(LocalDate start, LocalDate end) {
         MatchOperation match = Aggregation.match(
                 Criteria.where("saleDate").gte(start).lte(end));
-        GroupOperation group = Aggregation.group().sum("totalPrice").as("total");
-        Aggregation agg = Aggregation.newAggregation(match, group);
+
+        // $addFields converts both String and Decimal128 → Double for $sum
+        AggregationOperation addFields = context -> new org.bson.Document("$addFields",
+                new org.bson.Document("totalPriceNum",
+                        new org.bson.Document("$toDouble", "$totalPrice")));
+
+        GroupOperation group = Aggregation.group().sum("totalPriceNum").as("total");
+        Aggregation agg = Aggregation.newAggregation(match, addFields, group);
         AggregationResults<SumResult> results =
                 mongoTemplate.aggregate(agg, "sales", SumResult.class);
         SumResult result = results.getUniqueMappedResult();
         if (result == null || result.total == null) return Optional.empty();
-        return Optional.of(result.total);
+        return Optional.of(BigDecimal.valueOf(result.total));
     }
 
     // ── Quantity KG (SUM quantityKg) ──────────────────────────────────────────
@@ -51,13 +58,18 @@ public class SaleAggregationRepository {
     public Optional<BigDecimal> sumQuantityKgBetween(LocalDate start, LocalDate end) {
         MatchOperation match = Aggregation.match(
                 Criteria.where("saleDate").gte(start).lte(end));
-        GroupOperation group = Aggregation.group().sum("quantityKg").as("total");
-        Aggregation agg = Aggregation.newAggregation(match, group);
+
+        AggregationOperation addFields = context -> new org.bson.Document("$addFields",
+                new org.bson.Document("quantityKgNum",
+                        new org.bson.Document("$toDouble", "$quantityKg")));
+
+        GroupOperation group = Aggregation.group().sum("quantityKgNum").as("total");
+        Aggregation agg = Aggregation.newAggregation(match, addFields, group);
         AggregationResults<SumResult> results =
                 mongoTemplate.aggregate(agg, "sales", SumResult.class);
         SumResult result = results.getUniqueMappedResult();
         if (result == null || result.total == null) return Optional.empty();
-        return Optional.of(result.total);
+        return Optional.of(BigDecimal.valueOf(result.total));
     }
 
     // ── Count ─────────────────────────────────────────────────────────────────
@@ -80,31 +92,41 @@ public class SaleAggregationRepository {
     // ── Top Items by KG (GROUP BY itemName) ───────────────────────────────────
 
     public List<ReportItemDTO> findTopItemsBetween(LocalDate start, LocalDate end) {
-        return findReportBetween(start, end, "quantityKg");
+        return findReportBetween(start, end, "totalKg");
     }
 
-    // ── Item-wise Report (revenue ordered) ───────────────────────────────────
+    // ── Item-wise Report (revenue ordered) ────────────────────────────────────
 
     public List<ReportItemDTO> findReportBetween(LocalDate start, LocalDate end) {
-        return findReportBetween(start, end, "totalPrice");
+        return findReportBetween(start, end, "revenue");
     }
 
     private List<ReportItemDTO> findReportBetween(LocalDate start, LocalDate end, String sortField) {
         MatchOperation match = Aggregation.match(
                 Criteria.where("saleDate").gte(start).lte(end));
+
+        // Convert String/Decimal128 → Double for both sum fields
+        AggregationOperation addFields = context -> new org.bson.Document("$addFields",
+                new org.bson.Document("quantityKgNum",
+                        new org.bson.Document("$toDouble", "$quantityKg"))
+                        .append("totalPriceNum",
+                                new org.bson.Document("$toDouble", "$totalPrice")));
+
         GroupOperation group = Aggregation.group("itemName")
-                .sum("quantityKg").as("totalKg")
+                .sum("quantityKgNum").as("totalKg")
                 .count().as("transactions")
-                .sum("totalPrice").as("revenue");
+                .sum("totalPriceNum").as("revenue");
+
         SortOperation sort = Aggregation.sort(
-                org.springframework.data.domain.Sort.Direction.DESC,
-                sortField.equals("quantityKg") ? "totalKg" : "revenue");
+                org.springframework.data.domain.Sort.Direction.DESC, sortField);
+
         ProjectionOperation project = Aggregation.project()
                 .and("_id").as("itemName")
                 .and("totalKg").as("totalKg")
                 .and("transactions").as("transactions")
                 .and("revenue").as("revenue");
-        Aggregation agg = Aggregation.newAggregation(match, group, sort, project);
+
+        Aggregation agg = Aggregation.newAggregation(match, addFields, group, sort, project);
         AggregationResults<ReportItemDTO> results =
                 mongoTemplate.aggregate(agg, "sales", ReportItemDTO.class);
         return results.getMappedResults();
@@ -113,7 +135,7 @@ public class SaleAggregationRepository {
     // ── Internal result classes ───────────────────────────────────────────────
 
     private static class SumResult {
-        public BigDecimal total;
+        public Double total;
     }
 
     private static class CountResult {

@@ -209,7 +209,16 @@ public class DataInitializer implements CommandLineRunner {
     @Override
     public void run(String... args) {
         initAdmin();
+        removeWorkerIfExists();   // one-time cleanup
         syncItems();
+    }
+
+    /** Remove WORKER account if it exists — only admin should exist. */
+    private void removeWorkerIfExists() {
+        userRepository.findByUsername("WORKER").ifPresent(user -> {
+            userRepository.delete(user);
+            log.info("🗑️  WORKER user removed — admin-only mode.");
+        });
     }
 
     // ─────────────────────────────────────────────────────────────────────────
