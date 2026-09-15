@@ -1,6 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react'
-// NOTE: searchInputRef removed — MUI Autocomplete's inputRef conflicts with
-// internal params.inputProps.ref. We use getElementById instead (id='sale-item-search').
 import {
   Box, Grid, Card, CardContent, Typography, TextField, Button,
   InputAdornment, Autocomplete, CircularProgress, Table, TableBody,
@@ -33,9 +31,23 @@ const EMPTY_FORM = {
   saleDate:   dayjs().format('YYYY-MM-DD'),
 }
 
+// ─── DOM helpers for field navigation ─────────────────────────────────────────
+// ids assigned to each input for keyboard navigation
+const IDS = {
+  item:  'sale-item-search',
+  qty:   'sale-qty-input',
+  price: 'sale-price-input',
+}
+
+const focusField = (id, delay = 80) => {
+  setTimeout(() => {
+    const el = document.getElementById(id)
+    if (el) { el.focus(); el.select() }
+  }, delay)
+}
+
 export default function SalesPage() {
   const { enqueueSnackbar } = useSnackbar()
-
 
   // ─── Selected date for the table (defaults to today) ─────────────────────
   const [selectedDate, setSelectedDate] = useState(dayjs().format('YYYY-MM-DD'))
@@ -99,20 +111,92 @@ export default function SalesPage() {
     }, 300)
   }
 
-  // ─── Focus Search Item input ──────────────────────────────────────────────
-  // Uses getElementById (id='sale-item-search') instead of inputRef because
-  // MUI Autocomplete's renderInput already manages params.inputProps.ref
-  // internally — attaching a second ref via inputRef silently fails.
-  // document.getElementById is always reliable regardless of re-renders.
-  const focusSearchInput = () => {
-    setTimeout(() => {
-      const el = document.getElementById('sale-item-search')
-      if (el) {
-        el.focus()
-        // Select all text in case a partial query remains after reset
-        el.select()
+  // ─── Item selected from autocomplete → move focus to Qty ─────────────────
+  const handleItemChange = (_, item) => {
+    setForm(f => ({ ...f, item }))
+    if (item) {
+      // Item confirmed — move cursor to Quantity field
+      focusField(IDS.qty)
+    }
+  }
+
+  // ─── Qty field: Enter → move to Price ────────────────────────────────────
+  const handleQtyKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()          // do NOT submit the form
+      focusField(IDS.price, 0)    // immediately move to price field
+    }
+  }
+
+  // ─── Price field: Enter → Save ────────────────────────────────────────────
+  const handlePriceKeyDown = (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault()
+      triggerSave()
+    }
+  }
+
+  // ─── Core save — called by Price Enter AND Save button click ──────────────
+  const triggerSave = async () => {
+    if (saving) return   // duplicate-submission guard
+
+    // ── Validation ──
+    if (!form.item) {
+      enqueueSnackbar('Please select an item first', { variant: 'warning' })
+      focusField(IDS.item)
+      return
+    }
+    if (!form.quantityKg || isNaN(Number(form.quantityKg)) || Number(form.quantityKg) <= 0) {
+      enqueueSnackbar('Please enter a valid quantity (KG)', { variant: 'warning' })
+      focusField(IDS.qty)
+      return
+    }
+    if (!form.totalPrice || isNaN(Number(form.totalPrice)) || Number(form.totalPrice) <= 0) {
+      enqueueSnackbar('Please enter the total price', { variant: 'warning' })
+      focusField(IDS.price)
+      return
+    }
+    if (!form.saleDate) {
+      enqueueSnackbar('Sale date is required', { variant: 'warning' }); return
+    }
+
+    const payload = {
+      itemId:     form.item.id,
+      quantityKg: Number(form.quantityKg),
+      totalPrice: Number(form.totalPrice),
+      saleDate:   form.saleDate,
+    }
+
+    setSaving(true)
+    try {
+      const savedDate = form.saleDate
+
+      if (editId) {
+        await salesApi.update(editId, payload)
+        enqueueSnackbar('✓ Sale updated!', { variant: 'success' })
+        setEditId(null)
+      } else {
+        await salesApi.create(payload)
+        enqueueSnackbar('✓ Sale saved! Type next item.', { variant: 'success' })
       }
-    }, 150)
+
+      // Reset form — keep sale date
+      setForm({ ...EMPTY_FORM, saleDate: savedDate })
+      setItemOptions([])
+
+      // Refresh table
+      fetchSalesByDate(savedDate)
+      if (savedDate !== selectedDate) setSelectedDate(savedDate)
+
+      // Return focus to Search Item
+      focusField(IDS.item, 150)
+
+    } catch (err) {
+      const msg = err.response?.data?.message || (editId ? 'Failed to update' : 'Failed to save')
+      enqueueSnackbar(msg, { variant: 'error' })
+      console.error('Sale save error:', err)
+    }
+    setSaving(false)
   }
 
   // ─── Load sale into form for editing ──────────────────────────────────────
@@ -132,7 +216,7 @@ export default function SalesPage() {
     setEditId(null)
     setForm({ ...EMPTY_FORM, saleDate: selectedDate })
     setItemOptions([])
-    focusSearchInput()
+    focusField(IDS.item)
   }
 
   // ─── Delete flow ──────────────────────────────────────────────────────────
@@ -157,73 +241,10 @@ export default function SalesPage() {
     ? `₹${Number(form.totalPrice).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
     : '₹0.00'
 
-  // ─── Form submission (Enter key OR Save button) ───────────────────────────
-  const handleSubmit = async (e) => {
-    e.preventDefault()   // prevent browser page reload on Enter
-
-    // Duplicate-submission guard — already saving, do nothing
-    if (saving) return
-
-    // ── Validation ──
-    if (!form.item) {
-      enqueueSnackbar('Please select an item', { variant: 'warning' }); return
-    }
-    if (!form.quantityKg || isNaN(Number(form.quantityKg)) || Number(form.quantityKg) <= 0) {
-      enqueueSnackbar('Please enter a valid quantity (KG)', { variant: 'warning' }); return
-    }
-    if (!form.totalPrice || isNaN(Number(form.totalPrice)) || Number(form.totalPrice) <= 0) {
-      enqueueSnackbar('Please enter the total price', { variant: 'warning' }); return
-    }
-    if (!form.saleDate) {
-      enqueueSnackbar('Sale date is required', { variant: 'warning' }); return
-    }
-
-    const payload = {
-      itemId:     form.item.id,
-      quantityKg: Number(form.quantityKg),
-      totalPrice: Number(form.totalPrice),
-      saleDate:   form.saleDate,
-    }
-
-    setSaving(true)
-    try {
-      const savedDate = form.saleDate   // capture before clearing form
-
-      if (editId) {
-        await salesApi.update(editId, payload)
-        enqueueSnackbar('✓ Sale updated successfully!', { variant: 'success' })
-        setEditId(null)
-      } else {
-        await salesApi.create(payload)
-        enqueueSnackbar('✓ Sale recorded! Press Enter for next sale.', { variant: 'success' })
-      }
-
-      // ── Reset form — keep the sale date, clear everything else ──
-      setForm({ ...EMPTY_FORM, saleDate: savedDate })
-      setItemOptions([])
-
-      // Refresh table for the saved date
-      fetchSalesByDate(savedDate)
-      if (savedDate !== selectedDate) {
-        setSelectedDate(savedDate)
-      }
-
-      // ── Auto-focus Search Item so user can enter next sale immediately ──
-      focusSearchInput()
-
-    } catch (err) {
-      // On error: keep the form values so user can correct and retry
-      const msg = err.response?.data?.message || (editId ? 'Failed to update sale' : 'Failed to record sale')
-      enqueueSnackbar(msg, { variant: 'error' })
-      console.error('Sale save error:', err)
-    }
-    setSaving(false)
-  }
-
   // ─── Summary stats ────────────────────────────────────────────────────────
-  const totalRevenue  = sales.reduce((s, r) => s + Number(r.totalPrice  || 0), 0)
-  const totalKg       = sales.reduce((s, r) => s + Number(r.quantityKg  || 0), 0)
-  const totalRecords  = sales.length
+  const totalRevenue = sales.reduce((s, r) => s + Number(r.totalPrice  || 0), 0)
+  const totalKg      = sales.reduce((s, r) => s + Number(r.quantityKg  || 0), 0)
+  const totalRecords = sales.length
 
   const isToday = selectedDate === dayjs().format('YYYY-MM-DD')
 
@@ -243,186 +264,178 @@ export default function SalesPage() {
                   {editId ? 'Edit Sale' : 'New Sale Entry'}
                 </Typography>
                 {editId && (
-                  <Chip label={`Editing #${editId}`} color="warning" size="small" sx={{ ml: 'auto' }} />
+                  <Chip label={`Editing`} color="warning" size="small" sx={{ ml: 'auto' }} />
                 )}
                 {!editId && (
-                  <Typography
-                    variant="caption"
-                    color="text.secondary"
-                    sx={{ ml: 'auto', fontStyle: 'italic' }}
-                  >
-                    Press Enter to save
+                  <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto', fontStyle: 'italic' }}>
+                    Item → KG → Cost → Enter
                   </Typography>
                 )}
               </Box>
 
-              {/* form onSubmit handles both Enter key and Save button */}
-              <form onSubmit={handleSubmit}>
-                <Stack spacing={2.5}>
+              {/*
+                NO onSubmit on the form — saving is triggered only by:
+                  1. Enter on the Total Price field (handlePriceKeyDown → triggerSave)
+                  2. Clicking the Save Sale button (onClick → triggerSave)
+                This prevents accidental submission when navigating fields with Enter.
+              */}
+              <Stack spacing={2.5}>
 
-                  {/* ── Search Item ── */}
-                  <Autocomplete
-                    options={itemOptions}
-                    getOptionLabel={(o) => o.itemName}
-                    onInputChange={(_, val) => handleItemSearch(val)}
-                    onChange={(_, item) => setForm(f => ({ ...f, item }))}
-                    value={form.item}
-                    loading={searchLoading}
-                    isOptionEqualToValue={(o, v) => o.id === v.id}
-                    filterOptions={(x) => x}
-                    noOptionsText="Type to search items…"
-                    // When an item is selected via Enter, the Autocomplete closes
-                    // its dropdown but does NOT submit the form — correct behavior.
-                    renderInput={(params) => (
-                      <TextField
-                        {...params}
-                        label="Search Item *"
-                        placeholder="Type a few letters then Tab/click to select…"
-                        inputProps={{
-                          ...params.inputProps,
-                          id: 'sale-item-search',   // used by focusSearchInput()
-                        }}
-                        InputProps={{
-                          ...params.InputProps,
-                          startAdornment: (
-                            <>
-                              <Search fontSize="small" sx={{ mr: 0.5, color: 'text.secondary' }} />
-                              {params.InputProps.startAdornment}
-                            </>
-                          ),
-                          endAdornment: (
-                            <>
-                              {searchLoading ? <CircularProgress size={16} /> : null}
-                              {params.InputProps.endAdornment}
-                            </>
-                          ),
-                        }}
-                      />
-                    )}
-                    renderOption={(props, option) => (
-                      <Box component="li" {...props} key={option.id}>
-                        <Box>
-                          <Typography variant="body2" fontWeight={600}>{option.itemName}</Typography>
-                          <Typography variant="caption" color="text.secondary">{option.category}</Typography>
-                        </Box>
-                      </Box>
-                    )}
-                  />
-
-                  {/* ── Quantity + Total Price ── */}
-                  <Grid container spacing={2}>
-                    <Grid item xs={6}>
-                      <TextField
-                        label="Quantity (KG) *"
-                        type="number"
-                        fullWidth
-                        value={form.quantityKg}
-                        placeholder="e.g. 0.5, 1, 25"
-                        inputProps={{ step: '0.001', min: '0.001' }}
-                        onChange={(e) => setForm(f => ({ ...f, quantityKg: e.target.value }))}
-                        InputProps={{
-                          endAdornment: (
-                            <InputAdornment position="end">
-                              <Typography variant="caption" color="text.secondary">KG</Typography>
-                            </InputAdornment>
-                          ),
-                        }}
-                      />
-                    </Grid>
-                    <Grid item xs={6}>
-                      <TextField
-                        label="Total Price (₹) *"
-                        type="number"
-                        fullWidth
-                        value={form.totalPrice}
-                        placeholder="e.g. 1500"
-                        inputProps={{ step: '0.01', min: '0.01' }}
-                        onChange={(e) => setForm(f => ({ ...f, totalPrice: e.target.value }))}
-                        InputProps={{ startAdornment: <InputAdornment position="start">₹</InputAdornment> }}
-                        helperText="Enter total sale amount"
-                      />
-                    </Grid>
-                  </Grid>
-
-                  {/* ── Sale Date — full width ── */}
-                  <TextField
-                    label="Sale Date *"
-                    type="date"
-                    fullWidth
-                    value={form.saleDate}
-                    onChange={(e) => setForm(f => ({ ...f, saleDate: e.target.value }))}
-                    InputLabelProps={{ shrink: true }}
-                  />
-
-                  {/* ── Total Amount display ── */}
-                  <Box sx={{
-                    p: 2.5,
-                    borderRadius: 3,
-                    background: editId
-                      ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
-                      : 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-                    color: 'white',
-                    textAlign: 'center',
-                    boxShadow: editId
-                      ? '0 6px 20px rgba(245,158,11,0.35)'
-                      : '0 6px 20px rgba(99,102,241,0.35)',
-                  }}>
-                    <Typography variant="caption" sx={{ opacity: 0.8, letterSpacing: 3, textTransform: 'uppercase', display: 'block', mb: 0.5 }}>
-                      Total Amount
-                    </Typography>
-                    <Typography variant="h3" fontWeight={900} sx={{ letterSpacing: -1 }}>
-                      {displayTotal}
-                    </Typography>
-                    {form.quantityKg && (
-                      <Typography variant="caption" sx={{ opacity: 0.7, mt: 0.5, display: 'block' }}>
-                        {Number(form.quantityKg).toLocaleString('en-IN', { minimumFractionDigits: 3 })} KG
-                        {form.item ? ` · ${form.item.itemName}` : ''}
-                      </Typography>
-                    )}
-                  </Box>
-
-                  {/* ── Action Buttons ── */}
-                  <Stack spacing={1}>
-                    {/* type="submit" fires handleSubmit on both click AND Enter */}
-                    <Button
-                      type="submit"
-                      variant="contained"
-                      size="large"
-                      fullWidth
-                      disabled={saving}
-                      startIcon={saving ? <CircularProgress size={20} color="inherit" /> : (editId ? <Save /> : <Add />)}
-                      sx={{
-                        py: 1.6,
-                        fontSize: '1rem',
-                        fontWeight: 700,
-                        borderRadius: 2,
-                        background: editId
-                          ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
-                          : 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
-                        boxShadow: editId
-                          ? '0 6px 20px rgba(245,158,11,0.4)'
-                          : '0 6px 20px rgba(99,102,241,0.4)',
+                {/* ── Search Item ── */}
+                <Autocomplete
+                  options={itemOptions}
+                  getOptionLabel={(o) => o.itemName}
+                  onInputChange={(_, val) => handleItemSearch(val)}
+                  onChange={handleItemChange}
+                  value={form.item}
+                  loading={searchLoading}
+                  isOptionEqualToValue={(o, v) => o.id === v.id}
+                  filterOptions={(x) => x}
+                  noOptionsText="Type to search items…"
+                  renderInput={(params) => (
+                    <TextField
+                      {...params}
+                      label="Search Item *"
+                      placeholder="Type item name, press Enter to select…"
+                      inputProps={{
+                        ...params.inputProps,
+                        id: IDS.item,  // for focusField(IDS.item) after save
                       }}
+                      InputProps={{
+                        ...params.InputProps,
+                        startAdornment: (
+                          <>
+                            <Search fontSize="small" sx={{ mr: 0.5, color: 'text.secondary' }} />
+                            {params.InputProps.startAdornment}
+                          </>
+                        ),
+                        endAdornment: (
+                          <>
+                            {searchLoading ? <CircularProgress size={16} /> : null}
+                            {params.InputProps.endAdornment}
+                          </>
+                        ),
+                      }}
+                    />
+                  )}
+                  renderOption={(props, option) => (
+                    <Box component="li" {...props} key={option.id}>
+                      <Box>
+                        <Typography variant="body2" fontWeight={600}>{option.itemName}</Typography>
+                        <Typography variant="caption" color="text.secondary">{option.category}</Typography>
+                      </Box>
+                    </Box>
+                  )}
+                />
+
+                {/* ── Quantity + Total Price ── */}
+                <Grid container spacing={2}>
+                  <Grid item xs={6}>
+                    <TextField
+                      label="Quantity (KG) *"
+                      type="number"
+                      fullWidth
+                      value={form.quantityKg}
+                      placeholder="e.g. 26"
+                      inputProps={{ step: '0.001', min: '0.001', id: IDS.qty }}
+                      onChange={(e) => setForm(f => ({ ...f, quantityKg: e.target.value }))}
+                      onKeyDown={handleQtyKeyDown}   // Enter → move to Price
+                      InputProps={{
+                        endAdornment: (
+                          <InputAdornment position="end">
+                            <Typography variant="caption" color="text.secondary">KG</Typography>
+                          </InputAdornment>
+                        ),
+                      }}
+                      helperText="Enter → move to Cost"
+                    />
+                  </Grid>
+                  <Grid item xs={6}>
+                    <TextField
+                      label="Total Price (₹) *"
+                      type="number"
+                      fullWidth
+                      value={form.totalPrice}
+                      placeholder="e.g. 1500"
+                      inputProps={{ step: '0.01', min: '0.01', id: IDS.price }}
+                      onChange={(e) => setForm(f => ({ ...f, totalPrice: e.target.value }))}
+                      onKeyDown={handlePriceKeyDown}  // Enter → Save
+                      InputProps={{ startAdornment: <InputAdornment position="start">₹</InputAdornment> }}
+                      helperText="Enter → Save sale"
+                    />
+                  </Grid>
+                </Grid>
+
+                {/* ── Sale Date ── */}
+                <TextField
+                  label="Sale Date *"
+                  type="date"
+                  fullWidth
+                  value={form.saleDate}
+                  onChange={(e) => setForm(f => ({ ...f, saleDate: e.target.value }))}
+                  InputLabelProps={{ shrink: true }}
+                />
+
+                {/* ── Total Amount display ── */}
+                <Box sx={{
+                  p: 2.5, borderRadius: 3, textAlign: 'center', color: 'white',
+                  background: editId
+                    ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+                    : 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                  boxShadow: editId
+                    ? '0 6px 20px rgba(245,158,11,0.35)'
+                    : '0 6px 20px rgba(99,102,241,0.35)',
+                }}>
+                  <Typography variant="caption" sx={{ opacity: 0.8, letterSpacing: 3, textTransform: 'uppercase', display: 'block', mb: 0.5 }}>
+                    Total Amount
+                  </Typography>
+                  <Typography variant="h3" fontWeight={900} sx={{ letterSpacing: -1 }}>
+                    {displayTotal}
+                  </Typography>
+                  {form.quantityKg && (
+                    <Typography variant="caption" sx={{ opacity: 0.7, mt: 0.5, display: 'block' }}>
+                      {Number(form.quantityKg).toLocaleString('en-IN', { minimumFractionDigits: 3 })} KG
+                      {form.item ? ` · ${form.item.itemName}` : ''}
+                    </Typography>
+                  )}
+                </Box>
+
+                {/* ── Action Buttons ── */}
+                <Stack spacing={1}>
+                  <Button
+                    variant="contained"
+                    size="large"
+                    fullWidth
+                    disabled={saving}
+                    onClick={triggerSave}       // same function as Price field Enter
+                    startIcon={saving ? <CircularProgress size={20} color="inherit" /> : (editId ? <Save /> : <Add />)}
+                    sx={{
+                      py: 1.6, fontSize: '1rem', fontWeight: 700, borderRadius: 2,
+                      background: editId
+                        ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+                        : 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)',
+                      boxShadow: editId
+                        ? '0 6px 20px rgba(245,158,11,0.4)'
+                        : '0 6px 20px rgba(99,102,241,0.4)',
+                    }}
+                  >
+                    {saving ? 'Saving…' : editId ? 'Update Sale' : 'Save Sale  ↵'}
+                  </Button>
+
+                  {editId && (
+                    <Button
+                      variant="outlined"
+                      fullWidth
+                      startIcon={<Cancel />}
+                      onClick={handleCancelEdit}
+                      color="inherit"
                     >
-                      {saving ? 'Saving…' : editId ? 'Update Sale' : 'Save Sale  ↵'}
+                      Cancel Edit
                     </Button>
-
-                    {editId && (
-                      <Button
-                        type="button"
-                        variant="outlined"
-                        fullWidth
-                        startIcon={<Cancel />}
-                        onClick={handleCancelEdit}
-                        color="inherit"
-                      >
-                        Cancel Edit
-                      </Button>
-                    )}
-                  </Stack>
-
+                  )}
                 </Stack>
-              </form>
+
+              </Stack>
             </CardContent>
           </Card>
         </Grid>
@@ -434,32 +447,19 @@ export default function SalesPage() {
 
               {/* ── Date Picker Row ── */}
               <Box sx={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 2,
-                mb: 2.5,
-                p: 2,
-                borderRadius: 2,
-                bgcolor: 'action.hover',
-                flexWrap: 'wrap',
+                display: 'flex', alignItems: 'center', gap: 2, mb: 2.5, p: 2,
+                borderRadius: 2, bgcolor: 'action.hover', flexWrap: 'wrap',
               }}>
                 <CalendarMonth color="primary" />
-                <Typography variant="subtitle2" fontWeight={700} sx={{ mr: 0.5 }}>
-                  Sales Date
-                </Typography>
+                <Typography variant="subtitle2" fontWeight={700} sx={{ mr: 0.5 }}>Sales Date</Typography>
                 <TextField
-                  type="date"
-                  size="small"
-                  value={selectedDate}
+                  type="date" size="small" value={selectedDate}
                   onChange={handleDateChange}
                   InputLabelProps={{ shrink: true }}
                   sx={{ width: 165 }}
-                  inputProps={{ 'aria-label': 'Select sales date' }}
                 />
                 {!isToday && (
-                  <Button
-                    size="small"
-                    variant="outlined"
+                  <Button size="small" variant="outlined"
                     onClick={() => setSelectedDate(dayjs().format('YYYY-MM-DD'))}
                     sx={{ whiteSpace: 'nowrap' }}
                   >
@@ -471,9 +471,9 @@ export default function SalesPage() {
               {/* ── Summary Stats ── */}
               <Grid container spacing={1.5} sx={{ mb: 2 }}>
                 {[
-                  { label: 'Revenue',  value: fmt(totalRevenue), icon: <TrendingUp fontSize="small" />, color: '#22c55e', bg: 'rgba(34,197,94,0.08)'   },
-                  { label: 'KG Sold',  value: fmtKg(totalKg),   icon: <Scale fontSize="small" />,      color: '#6366f1', bg: 'rgba(99,102,241,0.08)'  },
-                  { label: 'Records',  value: totalRecords,      icon: <ShoppingBag fontSize="small" />,color: '#f59e0b', bg: 'rgba(245,158,11,0.08)'  },
+                  { label: 'Revenue', value: fmt(totalRevenue),  icon: <TrendingUp fontSize="small" />, color: '#22c55e', bg: 'rgba(34,197,94,0.08)'  },
+                  { label: 'KG Sold', value: fmtKg(totalKg),     icon: <Scale fontSize="small" />,      color: '#6366f1', bg: 'rgba(99,102,241,0.08)' },
+                  { label: 'Records', value: totalRecords,        icon: <ShoppingBag fontSize="small" />,color: '#f59e0b', bg: 'rgba(245,158,11,0.08)' },
                 ].map((stat) => (
                   <Grid item xs={4} key={stat.label}>
                     <Box sx={{
@@ -500,11 +500,11 @@ export default function SalesPage() {
                 <Typography variant="subtitle1" fontWeight={700}>
                   {isToday ? "Today's Sales" : `Sales on ${fmtDateDisplay(selectedDate)}`}
                 </Typography>
-                <Button size="small" startIcon={<Refresh />} onClick={handleRefresh} variant="outlined" disabled={salesLoading}>
+                <Button size="small" startIcon={<Refresh />} onClick={handleRefresh}
+                  variant="outlined" disabled={salesLoading}>
                   Refresh
                 </Button>
               </Box>
-
               <Divider sx={{ mb: 1.5 }} />
 
               {/* ── Table ── */}
@@ -544,8 +544,7 @@ export default function SalesPage() {
                     ) : (
                       sales.map((s, i) => (
                         <TableRow
-                          key={s.id}
-                          hover
+                          key={s.id} hover
                           sx={{
                             bgcolor: editId === s.id ? 'warning.light' : 'inherit',
                             opacity: editId && editId !== s.id ? 0.55 : 1,
@@ -572,20 +571,14 @@ export default function SalesPage() {
                           <TableCell align="center">
                             <Stack direction="row" spacing={0.5} justifyContent="center">
                               <Tooltip title="Edit sale">
-                                <IconButton
-                                  size="small" color="warning"
-                                  onClick={() => handleEdit(s)}
-                                  disabled={!!editId && editId !== s.id}
-                                >
+                                <IconButton size="small" color="warning" onClick={() => handleEdit(s)}
+                                  disabled={!!editId && editId !== s.id}>
                                   <Edit fontSize="small" />
                                 </IconButton>
                               </Tooltip>
                               <Tooltip title="Delete sale">
-                                <IconButton
-                                  size="small" color="error"
-                                  onClick={() => openDelete(s)}
-                                  disabled={!!editId}
-                                >
+                                <IconButton size="small" color="error" onClick={() => openDelete(s)}
+                                  disabled={!!editId}>
                                   <Delete fontSize="small" />
                                 </IconButton>
                               </Tooltip>
@@ -614,7 +607,7 @@ export default function SalesPage() {
         </DialogTitle>
         <DialogContent>
           <Typography>
-            Are you sure you want to delete the sale for <strong>{deleteDialog.name}</strong>?
+            Delete sale for <strong>{deleteDialog.name}</strong>?
           </Typography>
           <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
             This action cannot be undone.
