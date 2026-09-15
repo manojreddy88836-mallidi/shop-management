@@ -47,54 +47,50 @@ const focusField = (id, delay = 80) => {
 /**
  * Normalize a string for search comparison:
  * - lowercase
- * - brackets ( ) [ ] { } → space
- * - other special chars / – _ → space
- * - collapse consecutive spaces → single space
- * - trim
+ * - lowercase
+ * - remove ALL spaces
+ * - remove brackets ( ) [ ] { }
+ * - remove ALL special characters
+ * - keep only a-z and 0-9
+ *
+ * Examples:
+ *   "HMT BELL (S)"   → "hmtbells"
+ *   "hmt bell s"     → "hmtbells"   ← both equal → MATCH
+ *   "10KG HMT BELL(S)" → "10kghmtbells"
  *
  * The original display name is NEVER modified.
  */
 const normalize = (str) => {
   if (!str) return ''
-  return str
-    .toLowerCase()
-    .replace(/[()[\]{}'"\-_/\\]/g, ' ')   // brackets + specials → space
-    .replace(/\s+/g, ' ')                  // collapse whitespace
-    .trim()
+  return str.toLowerCase().replace(/[^a-z0-9]/g, '')
+  // strips spaces, brackets, dashes, slashes — anything not a-z or 0-9
 }
 
 /**
- * Score an item against the user's search query.
+ * Score an item against the normalized query.
+ * Both normalizedItemName and normalizedQuery are pure alphanumeric (a-z0-9).
  *
- * Scoring priority:
- *  100 – exact normalized match
- *   90 – item name starts with the full normalized query
- *   80 – item name starts with the first query word (typed prefix)
- *   70 – normalized item name contains the full query as a substring
- *   50 – all individual query words appear somewhere in the item name
- *   -1 – no match (item is excluded from results)
+ * Priority:
+ *  100 – exact match          "hmtbells"  vs "hmtbells"
+ *   90 – item starts with query "hmtbell…" vs "hmtbell"
+ *   70 – item contains query   "10kghmtbells" vs "hmtbells"
+ *   -1 – no match (excluded)
  *
- * Additional tie-breaker: bonus points when the item name is shorter
- * (closer to what the user typed → more specific match).
+ * Tie-breaker: shorter normalized name wins (closer to what was typed).
  */
-const scoreItem = (normalizedItemName, normalizedQuery, queryWords) => {
+const scoreItem = (normalizedItemName, normalizedQuery) => {
   const name = normalizedItemName
+  if (!name.includes(normalizedQuery)) return -1        // no match → exclude
 
-  // All query words must appear somewhere — quick exclusion check
-  const allWordsPresent = queryWords.every(w => name.includes(w))
-  if (!allWordsPresent) return -1
+  let score = 70                                        // base: contains
+  if (name === normalizedQuery)          score = 100    // exact
+  else if (name.startsWith(normalizedQuery)) score = 90 // prefix
 
-  let score = 50  // base: all words found
-
-  if (name === normalizedQuery)             score = 100   // exact
-  else if (name.startsWith(normalizedQuery)) score = 90   // full prefix
-  else if (name.startsWith(queryWords[0]))   score = 80   // starts with first typed word
-  else if (name.includes(normalizedQuery))   score = 70   // contains full phrase
-
-  // Tie-break: shorter name wins (more specific to what was typed)
+  // Shorter name = more specific match → wins ties
   const lengthBonus = Math.max(0, 20 - name.length / 3)
   return score + lengthBonus
 }
+
 
 /**
  * MUI Autocomplete filterOptions replacement.
@@ -107,13 +103,11 @@ const buildFilterOptions = (allItems) => (_, { inputValue }) => {
   // Empty query — show first 20 items (alphabetical from server)
   if (!query) return allItems.slice(0, 20)
 
-  const queryWords = query.split(' ').filter(Boolean)
-
-  // Precompute normalized names once per filter call
+  // Score and rank all items — no queryWords split needed (pure alphanumeric)
   const scored = allItems
     .map(item => ({
       item,
-      score: scoreItem(normalize(item.itemName), query, queryWords),
+      score: scoreItem(normalize(item.itemName), query),
     }))
     .filter(({ score }) => score >= 0)
     .sort((a, b) => b.score - a.score)
