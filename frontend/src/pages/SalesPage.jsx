@@ -281,17 +281,24 @@ export default function SalesPage() {
 
   // ─── Delete ───────────────────────────────────────────────────────────────
   const confirmDelete = async () => {
+    const idToDelete = deleteDialog.id
     setDeleting(true)
     try {
-      await salesApi.delete(deleteDialog.id)
+      await salesApi.delete(idToDelete)
       enqueueSnackbar('✓ Sale deleted', { variant: 'success' })
       setDeleteDialog({ open: false, id: null, name: '' })
-      fetchSalesByDate(selectedDate)
+
+      // Remove the deleted record directly from state — NO API re-fetch,
+      // NO page reload, NO scroll reset. Summary cards recompute automatically.
+      // Serial numbers (#) resequence via {i + 1} in the table rows.
+      setSales(prev => prev.filter(s => s.id !== idToDelete))
+
     } catch (err) {
       enqueueSnackbar(err.response?.data?.message || 'Delete failed', { variant: 'error' })
     }
     setDeleting(false)
   }
+
 
   // ─── Computed ─────────────────────────────────────────────────────────────
   const displayTotal = form.totalPrice
