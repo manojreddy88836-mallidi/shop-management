@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react'
+// NOTE: searchInputRef removed — MUI Autocomplete's inputRef conflicts with
+// internal params.inputProps.ref. We use getElementById instead (id='sale-item-search').
 import {
   Box, Grid, Card, CardContent, Typography, TextField, Button,
   InputAdornment, Autocomplete, CircularProgress, Table, TableBody,
@@ -34,8 +36,6 @@ const EMPTY_FORM = {
 export default function SalesPage() {
   const { enqueueSnackbar } = useSnackbar()
 
-  // ─── Ref: Search Item input — used to auto-focus after every successful save ─
-  const searchInputRef = useRef(null)
 
   // ─── Selected date for the table (defaults to today) ─────────────────────
   const [selectedDate, setSelectedDate] = useState(dayjs().format('YYYY-MM-DD'))
@@ -100,14 +100,19 @@ export default function SalesPage() {
   }
 
   // ─── Focus Search Item input ──────────────────────────────────────────────
-  // Called after every successful save so the user can immediately type the
-  // next item without clicking anywhere.
+  // Uses getElementById (id='sale-item-search') instead of inputRef because
+  // MUI Autocomplete's renderInput already manages params.inputProps.ref
+  // internally — attaching a second ref via inputRef silently fails.
+  // document.getElementById is always reliable regardless of re-renders.
   const focusSearchInput = () => {
-    // Small delay lets React flush the state updates (form clear, itemOptions
-    // reset) before we call focus, ensuring the input is in its cleared state.
     setTimeout(() => {
-      searchInputRef.current?.focus()
-    }, 80)
+      const el = document.getElementById('sale-item-search')
+      if (el) {
+        el.focus()
+        // Select all text in case a partial query remains after reset
+        el.select()
+      }
+    }, 150)
   }
 
   // ─── Load sale into form for editing ──────────────────────────────────────
@@ -273,8 +278,10 @@ export default function SalesPage() {
                         {...params}
                         label="Search Item *"
                         placeholder="Type a few letters then Tab/click to select…"
-                        // Attach ref so we can programmatically focus after save
-                        inputRef={searchInputRef}
+                        inputProps={{
+                          ...params.inputProps,
+                          id: 'sale-item-search',   // used by focusSearchInput()
+                        }}
                         InputProps={{
                           ...params.InputProps,
                           startAdornment: (
