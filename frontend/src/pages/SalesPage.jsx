@@ -19,7 +19,6 @@ import { itemsApi } from '../api/itemsApi'
 const fmt   = (v) => `₹${Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
 const fmtKg = (v) => `${Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 3 })} KG`
 
-// format YYYY-MM-DD → "15 Jul 2026" for display
 const fmtDateDisplay = (iso) => {
   if (!iso) return ''
   return dayjs(iso).format('DD MMM YYYY')
@@ -35,12 +34,15 @@ const EMPTY_FORM = {
 export default function SalesPage() {
   const { enqueueSnackbar } = useSnackbar()
 
+  // ─── Ref: Search Item input — used to auto-focus after every successful save ─
+  const searchInputRef = useRef(null)
+
   // ─── Selected date for the table (defaults to today) ─────────────────────
   const [selectedDate, setSelectedDate] = useState(dayjs().format('YYYY-MM-DD'))
 
   // ─── Form state ───────────────────────────────────────────────────────────
   const [form, setForm]               = useState(EMPTY_FORM)
-  const [editId, setEditId]           = useState(null)   // null = create, string = edit
+  const [editId, setEditId]           = useState(null)
   const [itemOptions, setItemOptions] = useState([])
   const [searchLoading, setSearchLoading] = useState(false)
   const [saving, setSaving]           = useState(false)
@@ -61,7 +63,7 @@ export default function SalesPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate])
 
-  // ─── Core fetch: load sales for the currently selected date ──────────────
+  // ─── Core fetch ──────────────────────────────────────────────────────────
   const fetchSalesByDate = async (date) => {
     setSalesLoading(true)
     try {
@@ -74,10 +76,8 @@ export default function SalesPage() {
     setSalesLoading(false)
   }
 
-  // Refresh button — reloads for the CURRENTLY selected date (not today)
   const handleRefresh = () => fetchSalesByDate(selectedDate)
 
-  // ─── Date picker change ───────────────────────────────────────────────────
   const handleDateChange = (e) => {
     const d = e.target.value
     if (d) setSelectedDate(d)
@@ -99,6 +99,17 @@ export default function SalesPage() {
     }, 300)
   }
 
+  // ─── Focus Search Item input ──────────────────────────────────────────────
+  // Called after every successful save so the user can immediately type the
+  // next item without clicking anywhere.
+  const focusSearchInput = () => {
+    // Small delay lets React flush the state updates (form clear, itemOptions
+    // reset) before we call focus, ensuring the input is in its cleared state.
+    setTimeout(() => {
+      searchInputRef.current?.focus()
+    }, 80)
+  }
+
   // ─── Load sale into form for editing ──────────────────────────────────────
   const handleEdit = (sale) => {
     setEditId(sale.id)
@@ -116,6 +127,7 @@ export default function SalesPage() {
     setEditId(null)
     setForm({ ...EMPTY_FORM, saleDate: selectedDate })
     setItemOptions([])
+    focusSearchInput()
   }
 
   // ─── Delete flow ──────────────────────────────────────────────────────────
@@ -135,15 +147,19 @@ export default function SalesPage() {
     setDeleting(false)
   }
 
-  // ─── Total Amount display (form) ──────────────────────────────────────────
+  // ─── Total Amount display ─────────────────────────────────────────────────
   const displayTotal = form.totalPrice
     ? `₹${Number(form.totalPrice).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
     : '₹0.00'
 
-  // ─── Form submission ──────────────────────────────────────────────────────
+  // ─── Form submission (Enter key OR Save button) ───────────────────────────
   const handleSubmit = async (e) => {
-    e.preventDefault()
+    e.preventDefault()   // prevent browser page reload on Enter
 
+    // Duplicate-submission guard — already saving, do nothing
+    if (saving) return
+
+    // ── Validation ──
     if (!form.item) {
       enqueueSnackbar('Please select an item', { variant: 'warning' }); return
     }
@@ -166,23 +182,32 @@ export default function SalesPage() {
 
     setSaving(true)
     try {
+      const savedDate = form.saleDate   // capture before clearing form
+
       if (editId) {
         await salesApi.update(editId, payload)
         enqueueSnackbar('✓ Sale updated successfully!', { variant: 'success' })
         setEditId(null)
       } else {
         await salesApi.create(payload)
-        enqueueSnackbar('✓ Sale recorded successfully!', { variant: 'success' })
+        enqueueSnackbar('✓ Sale recorded! Press Enter for next sale.', { variant: 'success' })
       }
-      // Reset form — keep same sale date
-      setForm({ ...EMPTY_FORM, saleDate: form.saleDate })
+
+      // ── Reset form — keep the sale date, clear everything else ──
+      setForm({ ...EMPTY_FORM, saleDate: savedDate })
       setItemOptions([])
-      // Refresh table for the saved sale's date
-      fetchSalesByDate(form.saleDate)
-      if (form.saleDate !== selectedDate) {
-        setSelectedDate(form.saleDate)
+
+      // Refresh table for the saved date
+      fetchSalesByDate(savedDate)
+      if (savedDate !== selectedDate) {
+        setSelectedDate(savedDate)
       }
+
+      // ── Auto-focus Search Item so user can enter next sale immediately ──
+      focusSearchInput()
+
     } catch (err) {
+      // On error: keep the form values so user can correct and retry
       const msg = err.response?.data?.message || (editId ? 'Failed to update sale' : 'Failed to record sale')
       enqueueSnackbar(msg, { variant: 'error' })
       console.error('Sale save error:', err)
@@ -190,7 +215,7 @@ export default function SalesPage() {
     setSaving(false)
   }
 
-  // ─── Summary stats for selected date (computed from loaded sales) ─────────
+  // ─── Summary stats ────────────────────────────────────────────────────────
   const totalRevenue  = sales.reduce((s, r) => s + Number(r.totalPrice  || 0), 0)
   const totalKg       = sales.reduce((s, r) => s + Number(r.quantityKg  || 0), 0)
   const totalRecords  = sales.length
@@ -215,12 +240,22 @@ export default function SalesPage() {
                 {editId && (
                   <Chip label={`Editing #${editId}`} color="warning" size="small" sx={{ ml: 'auto' }} />
                 )}
+                {!editId && (
+                  <Typography
+                    variant="caption"
+                    color="text.secondary"
+                    sx={{ ml: 'auto', fontStyle: 'italic' }}
+                  >
+                    Press Enter to save
+                  </Typography>
+                )}
               </Box>
 
+              {/* form onSubmit handles both Enter key and Save button */}
               <form onSubmit={handleSubmit}>
                 <Stack spacing={2.5}>
 
-                  {/* Search Item */}
+                  {/* ── Search Item ── */}
                   <Autocomplete
                     options={itemOptions}
                     getOptionLabel={(o) => o.itemName}
@@ -231,11 +266,15 @@ export default function SalesPage() {
                     isOptionEqualToValue={(o, v) => o.id === v.id}
                     filterOptions={(x) => x}
                     noOptionsText="Type to search items…"
+                    // When an item is selected via Enter, the Autocomplete closes
+                    // its dropdown but does NOT submit the form — correct behavior.
                     renderInput={(params) => (
                       <TextField
                         {...params}
                         label="Search Item *"
-                        placeholder="Type a few letters (e.g. HMT, GM)…"
+                        placeholder="Type a few letters then Tab/click to select…"
+                        // Attach ref so we can programmatically focus after save
+                        inputRef={searchInputRef}
                         InputProps={{
                           ...params.InputProps,
                           startAdornment: (
@@ -263,7 +302,7 @@ export default function SalesPage() {
                     )}
                   />
 
-                  {/* Quantity + Total Price */}
+                  {/* ── Quantity + Total Price ── */}
                   <Grid container spacing={2}>
                     <Grid item xs={6}>
                       <TextField
@@ -298,7 +337,7 @@ export default function SalesPage() {
                     </Grid>
                   </Grid>
 
-                  {/* Sale Date — full width now that time is removed */}
+                  {/* ── Sale Date — full width ── */}
                   <TextField
                     label="Sale Date *"
                     type="date"
@@ -308,7 +347,7 @@ export default function SalesPage() {
                     InputLabelProps={{ shrink: true }}
                   />
 
-                  {/* Total Amount display */}
+                  {/* ── Total Amount display ── */}
                   <Box sx={{
                     p: 2.5,
                     borderRadius: 3,
@@ -335,8 +374,9 @@ export default function SalesPage() {
                     )}
                   </Box>
 
-                  {/* Action Buttons */}
+                  {/* ── Action Buttons ── */}
                   <Stack spacing={1}>
+                    {/* type="submit" fires handleSubmit on both click AND Enter */}
                     <Button
                       type="submit"
                       variant="contained"
@@ -357,11 +397,12 @@ export default function SalesPage() {
                           : '0 6px 20px rgba(99,102,241,0.4)',
                       }}
                     >
-                      {saving ? 'Saving…' : editId ? 'Update Sale' : 'Save Sale'}
+                      {saving ? 'Saving…' : editId ? 'Update Sale' : 'Save Sale  ↵'}
                     </Button>
 
                     {editId && (
                       <Button
+                        type="button"
                         variant="outlined"
                         fullWidth
                         startIcon={<Cancel />}
@@ -420,40 +461,18 @@ export default function SalesPage() {
                 )}
               </Box>
 
-              {/* ── Summary Stats for selected date ── */}
+              {/* ── Summary Stats ── */}
               <Grid container spacing={1.5} sx={{ mb: 2 }}>
                 {[
-                  {
-                    label: 'Revenue',
-                    value: fmt(totalRevenue),
-                    icon: <TrendingUp fontSize="small" />,
-                    color: '#22c55e',
-                    bg: 'rgba(34,197,94,0.08)',
-                  },
-                  {
-                    label: 'KG Sold',
-                    value: fmtKg(totalKg),
-                    icon: <Scale fontSize="small" />,
-                    color: '#6366f1',
-                    bg: 'rgba(99,102,241,0.08)',
-                  },
-                  {
-                    label: 'Records',
-                    value: totalRecords,
-                    icon: <ShoppingBag fontSize="small" />,
-                    color: '#f59e0b',
-                    bg: 'rgba(245,158,11,0.08)',
-                  },
+                  { label: 'Revenue',  value: fmt(totalRevenue), icon: <TrendingUp fontSize="small" />, color: '#22c55e', bg: 'rgba(34,197,94,0.08)'   },
+                  { label: 'KG Sold',  value: fmtKg(totalKg),   icon: <Scale fontSize="small" />,      color: '#6366f1', bg: 'rgba(99,102,241,0.08)'  },
+                  { label: 'Records',  value: totalRecords,      icon: <ShoppingBag fontSize="small" />,color: '#f59e0b', bg: 'rgba(245,158,11,0.08)'  },
                 ].map((stat) => (
                   <Grid item xs={4} key={stat.label}>
                     <Box sx={{
-                      p: 1.5,
-                      borderRadius: 2,
-                      bgcolor: stat.bg,
+                      p: 1.5, borderRadius: 2, bgcolor: stat.bg,
                       borderLeft: `3px solid ${stat.color}`,
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 0.25,
+                      display: 'flex', flexDirection: 'column', gap: 0.25,
                     }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: stat.color }}>
                         {stat.icon}
@@ -472,17 +491,9 @@ export default function SalesPage() {
               {/* ── Table Header ── */}
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                 <Typography variant="subtitle1" fontWeight={700}>
-                  {isToday
-                    ? "Today's Sales"
-                    : `Sales on ${fmtDateDisplay(selectedDate)}`}
+                  {isToday ? "Today's Sales" : `Sales on ${fmtDateDisplay(selectedDate)}`}
                 </Typography>
-                <Button
-                  size="small"
-                  startIcon={<Refresh />}
-                  onClick={handleRefresh}
-                  variant="outlined"
-                  disabled={salesLoading}
-                >
+                <Button size="small" startIcon={<Refresh />} onClick={handleRefresh} variant="outlined" disabled={salesLoading}>
                   Refresh
                 </Button>
               </Box>
@@ -507,7 +518,7 @@ export default function SalesPage() {
                       Array(5).fill(0).map((_, i) => (
                         <TableRow key={i}>
                           <TableCell colSpan={6}>
-                            <Box sx={{ height: 36, bgcolor: 'action.hover', borderRadius: 1, animation: 'pulse 1.5s infinite' }} />
+                            <Box sx={{ height: 36, bgcolor: 'action.hover', borderRadius: 1 }} />
                           </TableCell>
                         </TableRow>
                       ))
@@ -519,9 +530,7 @@ export default function SalesPage() {
                             No sales on {fmtDateDisplay(selectedDate)}
                           </Typography>
                           <Typography color="text.secondary" variant="caption">
-                            {isToday
-                              ? 'Use the form on the left to record a sale'
-                              : 'Try selecting a different date'}
+                            {isToday ? 'Use the form on the left to record a sale' : 'Try selecting a different date'}
                           </Typography>
                         </TableCell>
                       </TableRow>
@@ -544,27 +553,20 @@ export default function SalesPage() {
                           <TableCell align="center">
                             <Chip
                               label={`${Number(s.quantityKg || 0).toLocaleString('en-IN', { minimumFractionDigits: 3 })} KG`}
-                              size="small"
-                              variant="outlined"
-                              color="primary"
+                              size="small" variant="outlined" color="primary"
                             />
                           </TableCell>
                           <TableCell align="right">
-                            <Typography fontWeight={700} color="success.main">
-                              {fmt(s.totalPrice)}
-                            </Typography>
+                            <Typography fontWeight={700} color="success.main">{fmt(s.totalPrice)}</Typography>
                           </TableCell>
                           <TableCell align="center">
-                            <Typography variant="body2" color="text.secondary">
-                              {s.saleDate}
-                            </Typography>
+                            <Typography variant="body2" color="text.secondary">{s.saleDate}</Typography>
                           </TableCell>
                           <TableCell align="center">
                             <Stack direction="row" spacing={0.5} justifyContent="center">
                               <Tooltip title="Edit sale">
                                 <IconButton
-                                  size="small"
-                                  color="warning"
+                                  size="small" color="warning"
                                   onClick={() => handleEdit(s)}
                                   disabled={!!editId && editId !== s.id}
                                 >
@@ -573,8 +575,7 @@ export default function SalesPage() {
                               </Tooltip>
                               <Tooltip title="Delete sale">
                                 <IconButton
-                                  size="small"
-                                  color="error"
+                                  size="small" color="error"
                                   onClick={() => openDelete(s)}
                                   disabled={!!editId}
                                 >
@@ -599,12 +600,10 @@ export default function SalesPage() {
       <Dialog
         open={deleteDialog.open}
         onClose={() => setDeleteDialog({ open: false, id: null, name: '' })}
-        maxWidth="xs"
-        fullWidth
+        maxWidth="xs" fullWidth
       >
         <DialogTitle sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-          <Delete color="error" />
-          Delete Sale
+          <Delete color="error" /> Delete Sale
         </DialogTitle>
         <DialogContent>
           <Typography>
@@ -617,16 +616,12 @@ export default function SalesPage() {
         <DialogActions sx={{ p: 2, gap: 1 }}>
           <Button
             onClick={() => setDeleteDialog({ open: false, id: null, name: '' })}
-            variant="outlined"
-            disabled={deleting}
+            variant="outlined" disabled={deleting}
           >
             Cancel
           </Button>
           <Button
-            onClick={confirmDelete}
-            variant="contained"
-            color="error"
-            disabled={deleting}
+            onClick={confirmDelete} variant="contained" color="error" disabled={deleting}
             startIcon={deleting ? <CircularProgress size={16} color="inherit" /> : <Delete />}
           >
             {deleting ? 'Deleting…' : 'Delete'}
