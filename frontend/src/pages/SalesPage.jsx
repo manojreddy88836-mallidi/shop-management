@@ -18,11 +18,7 @@ import { itemsApi } from '../api/itemsApi'
 // ─── helpers ──────────────────────────────────────────────────────────────────
 const fmt   = (v) => `₹${Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
 const fmtKg = (v) => `${Number(v || 0).toLocaleString('en-IN', { minimumFractionDigits: 3 })} KG`
-
-const fmtDateDisplay = (iso) => {
-  if (!iso) return ''
-  return dayjs(iso).format('DD MMM YYYY')
-}
+const fmtDateDisplay = (iso) => iso ? dayjs(iso).format('DD MMM YYYY') : ''
 
 const EMPTY_FORM = {
   item:       null,
@@ -31,14 +27,8 @@ const EMPTY_FORM = {
   saleDate:   dayjs().format('YYYY-MM-DD'),
 }
 
-// ─── DOM helpers for field navigation ─────────────────────────────────────────
-// ids assigned to each input for keyboard navigation
-const IDS = {
-  item:  'sale-item-search',
-  qty:   'sale-qty-input',
-  price: 'sale-price-input',
-}
-
+// ─── DOM focus helper ──────────────────────────────────────────────────────────
+const IDS = { item: 'sale-item-search', qty: 'sale-qty-input', price: 'sale-price-input' }
 const focusField = (id, delay = 80) => {
   setTimeout(() => {
     const el = document.getElementById(id)
@@ -46,115 +36,191 @@ const focusField = (id, delay = 80) => {
   }, delay)
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+//  SMART SEARCH ENGINE
+//  -------------------
+//  Normalization strips brackets, parentheses, and special characters so
+//  "hmt bell s" matches "HMT BELL (S)".
+//  Results are ranked by relevance — prefix matches come first.
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Normalize a string for search comparison:
+ * - lowercase
+ * - brackets ( ) [ ] { } → space
+ * - other special chars / – _ → space
+ * - collapse consecutive spaces → single space
+ * - trim
+ *
+ * The original display name is NEVER modified.
+ */
+const normalize = (str) => {
+  if (!str) return ''
+  return str
+    .toLowerCase()
+    .replace(/[()[\]{}'"\-_/\\]/g, ' ')   // brackets + specials → space
+    .replace(/\s+/g, ' ')                  // collapse whitespace
+    .trim()
+}
+
+/**
+ * Score an item against the user's search query.
+ *
+ * Scoring priority:
+ *  100 – exact normalized match
+ *   90 – item name starts with the full normalized query
+ *   80 – item name starts with the first query word (typed prefix)
+ *   70 – normalized item name contains the full query as a substring
+ *   50 – all individual query words appear somewhere in the item name
+ *   -1 – no match (item is excluded from results)
+ *
+ * Additional tie-breaker: bonus points when the item name is shorter
+ * (closer to what the user typed → more specific match).
+ */
+const scoreItem = (normalizedItemName, normalizedQuery, queryWords) => {
+  const name = normalizedItemName
+
+  // All query words must appear somewhere — quick exclusion check
+  const allWordsPresent = queryWords.every(w => name.includes(w))
+  if (!allWordsPresent) return -1
+
+  let score = 50  // base: all words found
+
+  if (name === normalizedQuery)             score = 100   // exact
+  else if (name.startsWith(normalizedQuery)) score = 90   // full prefix
+  else if (name.startsWith(queryWords[0]))   score = 80   // starts with first typed word
+  else if (name.includes(normalizedQuery))   score = 70   // contains full phrase
+
+  // Tie-break: shorter name wins (more specific to what was typed)
+  const lengthBonus = Math.max(0, 20 - name.length / 3)
+  return score + lengthBonus
+}
+
+/**
+ * MUI Autocomplete filterOptions replacement.
+ * Receives ALL loaded items and the current inputValue.
+ * Returns the top-30 ranked results.
+ */
+const buildFilterOptions = (allItems) => (_, { inputValue }) => {
+  const query = normalize(inputValue)
+
+  // Empty query — show first 20 items (alphabetical from server)
+  if (!query) return allItems.slice(0, 20)
+
+  const queryWords = query.split(' ').filter(Boolean)
+
+  // Precompute normalized names once per filter call
+  const scored = allItems
+    .map(item => ({
+      item,
+      score: scoreItem(normalize(item.itemName), query, queryWords),
+    }))
+    .filter(({ score }) => score >= 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 30)
+
+  return scored.map(({ item }) => item)
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+
 export default function SalesPage() {
   const { enqueueSnackbar } = useSnackbar()
 
-  // ─── Selected date for the table (defaults to today) ─────────────────────
+  // ─── All items (loaded once on mount) ─────────────────────────────────────
+  const [allItems,     setAllItems]     = useState([])
+  const [itemsLoading, setItemsLoading] = useState(true)
+
+  // Stable filterOptions reference — depends on allItems
+  const filterOptionsRef = useRef(buildFilterOptions([]))
+
+  useEffect(() => {
+    const load = async () => {
+      setItemsLoading(true)
+      try {
+        // Load all active items in one call — 136 items is tiny for client-side filter
+        const res = await itemsApi.getAll({ page: 0, size: 500, active: true })
+        const items = res.data.data?.content || res.data.data || []
+        setAllItems(items)
+        filterOptionsRef.current = buildFilterOptions(items)
+      } catch (e) {
+        console.error('Failed to load items', e)
+        enqueueSnackbar('Could not load items list', { variant: 'error' })
+      }
+      setItemsLoading(false)
+    }
+    load()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // ─── Selected date ────────────────────────────────────────────────────────
   const [selectedDate, setSelectedDate] = useState(dayjs().format('YYYY-MM-DD'))
 
   // ─── Form state ───────────────────────────────────────────────────────────
-  const [form, setForm]               = useState(EMPTY_FORM)
-  const [editId, setEditId]           = useState(null)
-  const [itemOptions, setItemOptions] = useState([])
-  const [searchLoading, setSearchLoading] = useState(false)
-  const [saving, setSaving]           = useState(false)
+  const [form, setForm]   = useState(EMPTY_FORM)
+  const [editId, setEditId] = useState(null)
+  const [saving, setSaving] = useState(false)
 
   // ─── Table state ──────────────────────────────────────────────────────────
-  const [sales, setSales]             = useState([])
+  const [sales,       setSales]       = useState([])
   const [salesLoading, setSalesLoading] = useState(true)
 
   // ─── Delete dialog ────────────────────────────────────────────────────────
   const [deleteDialog, setDeleteDialog] = useState({ open: false, id: null, name: '' })
-  const [deleting, setDeleting]         = useState(false)
+  const [deleting,     setDeleting]     = useState(false)
 
-  const searchTimer = useRef(null)
-
-  // ─── Load on mount + whenever selectedDate changes ───────────────────────
+  // ─── Load sales when selected date changes ────────────────────────────────
   useEffect(() => {
     fetchSalesByDate(selectedDate)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedDate])
 
-  // ─── Core fetch ──────────────────────────────────────────────────────────
   const fetchSalesByDate = async (date) => {
     setSalesLoading(true)
     try {
       const res = await salesApi.getByDate(date)
       setSales(res.data.data || [])
     } catch (e) {
-      console.error('Failed to fetch sales for', date, e)
+      console.error('Fetch sales error', e)
       enqueueSnackbar('Failed to load sales', { variant: 'error' })
     }
     setSalesLoading(false)
   }
 
-  const handleRefresh = () => fetchSalesByDate(selectedDate)
+  const handleRefresh   = () => fetchSalesByDate(selectedDate)
+  const handleDateChange = (e) => { if (e.target.value) setSelectedDate(e.target.value) }
 
-  const handleDateChange = (e) => {
-    const d = e.target.value
-    if (d) setSelectedDate(d)
-  }
-
-  // ─── Item search (debounced) ──────────────────────────────────────────────
-  const handleItemSearch = (query) => {
-    clearTimeout(searchTimer.current)
-    if (!query || query.length < 1) { setItemOptions([]); return }
-    searchTimer.current = setTimeout(async () => {
-      setSearchLoading(true)
-      try {
-        const res = await itemsApi.search(query)
-        setItemOptions(res.data.data || [])
-      } catch (e) {
-        console.error('Item search error:', e)
-      }
-      setSearchLoading(false)
-    }, 300)
-  }
-
-  // ─── Item selected from autocomplete → move focus to Qty ─────────────────
+  // ─── Item selected → move to Qty ─────────────────────────────────────────
   const handleItemChange = (_, item) => {
     setForm(f => ({ ...f, item }))
-    if (item) {
-      // Item confirmed — move cursor to Quantity field
-      focusField(IDS.qty)
-    }
+    if (item) focusField(IDS.qty)
   }
 
-  // ─── Qty field: Enter → move to Price ────────────────────────────────────
+  // ─── Qty Enter → move to Price ────────────────────────────────────────────
   const handleQtyKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()          // do NOT submit the form
-      focusField(IDS.price, 0)    // immediately move to price field
-    }
+    if (e.key === 'Enter') { e.preventDefault(); focusField(IDS.price, 0) }
   }
 
-  // ─── Price field: Enter → Save ────────────────────────────────────────────
+  // ─── Price Enter → Save ───────────────────────────────────────────────────
   const handlePriceKeyDown = (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault()
-      triggerSave()
-    }
+    if (e.key === 'Enter') { e.preventDefault(); triggerSave() }
   }
 
-  // ─── Core save — called by Price Enter AND Save button click ──────────────
+  // ─── Core save (called by Price Enter AND Save button) ───────────────────
   const triggerSave = async () => {
-    if (saving) return   // duplicate-submission guard
+    if (saving) return
 
-    // ── Validation ──
     if (!form.item) {
       enqueueSnackbar('Please select an item first', { variant: 'warning' })
-      focusField(IDS.item)
-      return
+      focusField(IDS.item); return
     }
     if (!form.quantityKg || isNaN(Number(form.quantityKg)) || Number(form.quantityKg) <= 0) {
       enqueueSnackbar('Please enter a valid quantity (KG)', { variant: 'warning' })
-      focusField(IDS.qty)
-      return
+      focusField(IDS.qty); return
     }
     if (!form.totalPrice || isNaN(Number(form.totalPrice)) || Number(form.totalPrice) <= 0) {
       enqueueSnackbar('Please enter the total price', { variant: 'warning' })
-      focusField(IDS.price)
-      return
+      focusField(IDS.price); return
     }
     if (!form.saleDate) {
       enqueueSnackbar('Sale date is required', { variant: 'warning' }); return
@@ -180,26 +246,22 @@ export default function SalesPage() {
         enqueueSnackbar('✓ Sale saved! Type next item.', { variant: 'success' })
       }
 
-      // Reset form — keep sale date
       setForm({ ...EMPTY_FORM, saleDate: savedDate })
-      setItemOptions([])
-
-      // Refresh table
       fetchSalesByDate(savedDate)
       if (savedDate !== selectedDate) setSelectedDate(savedDate)
-
-      // Return focus to Search Item
       focusField(IDS.item, 150)
 
     } catch (err) {
-      const msg = err.response?.data?.message || (editId ? 'Failed to update' : 'Failed to save')
-      enqueueSnackbar(msg, { variant: 'error' })
+      enqueueSnackbar(
+        err.response?.data?.message || (editId ? 'Failed to update' : 'Failed to save'),
+        { variant: 'error' }
+      )
       console.error('Sale save error:', err)
     }
     setSaving(false)
   }
 
-  // ─── Load sale into form for editing ──────────────────────────────────────
+  // ─── Edit / Cancel ────────────────────────────────────────────────────────
   const handleEdit = (sale) => {
     setEditId(sale.id)
     setForm({
@@ -208,21 +270,16 @@ export default function SalesPage() {
       totalPrice: String(sale.totalPrice || ''),
       saleDate:   sale.saleDate || selectedDate,
     })
-    setItemOptions([{ id: sale.itemId, itemName: sale.itemName, category: sale.category }])
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
 
   const handleCancelEdit = () => {
     setEditId(null)
     setForm({ ...EMPTY_FORM, saleDate: selectedDate })
-    setItemOptions([])
     focusField(IDS.item)
   }
 
-  // ─── Delete flow ──────────────────────────────────────────────────────────
-  const openDelete = (sale) =>
-    setDeleteDialog({ open: true, id: sale.id, name: sale.itemName })
-
+  // ─── Delete ───────────────────────────────────────────────────────────────
   const confirmDelete = async () => {
     setDeleting(true)
     try {
@@ -236,24 +293,22 @@ export default function SalesPage() {
     setDeleting(false)
   }
 
-  // ─── Total Amount display ─────────────────────────────────────────────────
+  // ─── Computed ─────────────────────────────────────────────────────────────
   const displayTotal = form.totalPrice
     ? `₹${Number(form.totalPrice).toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
     : '₹0.00'
 
-  // ─── Summary stats ────────────────────────────────────────────────────────
   const totalRevenue = sales.reduce((s, r) => s + Number(r.totalPrice  || 0), 0)
   const totalKg      = sales.reduce((s, r) => s + Number(r.quantityKg  || 0), 0)
   const totalRecords = sales.length
-
-  const isToday = selectedDate === dayjs().format('YYYY-MM-DD')
+  const isToday      = selectedDate === dayjs().format('YYYY-MM-DD')
 
   // ─── UI ───────────────────────────────────────────────────────────────────
   return (
     <Box>
       <Grid container spacing={3}>
 
-        {/* ══════════════════ LEFT: Sale Entry Form ══════════════════ */}
+        {/* ══════════ LEFT: Sale Entry Form ══════════ */}
         <Grid item xs={12} md={5}>
           <Card sx={{ height: '100%' }}>
             <CardContent sx={{ p: 3.5 }}>
@@ -263,43 +318,46 @@ export default function SalesPage() {
                 <Typography variant="h6" fontWeight={700}>
                   {editId ? 'Edit Sale' : 'New Sale Entry'}
                 </Typography>
-                {editId && (
-                  <Chip label={`Editing`} color="warning" size="small" sx={{ ml: 'auto' }} />
-                )}
-                {!editId && (
-                  <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto', fontStyle: 'italic' }}>
-                    Item → KG → Cost → Enter
-                  </Typography>
-                )}
+                {editId
+                  ? <Chip label="Editing" color="warning" size="small" sx={{ ml: 'auto' }} />
+                  : <Typography variant="caption" color="text.secondary" sx={{ ml: 'auto', fontStyle: 'italic' }}>
+                      Item → KG → Cost → Enter
+                    </Typography>
+                }
               </Box>
 
-              {/*
-                NO onSubmit on the form — saving is triggered only by:
-                  1. Enter on the Total Price field (handlePriceKeyDown → triggerSave)
-                  2. Clicking the Save Sale button (onClick → triggerSave)
-                This prevents accidental submission when navigating fields with Enter.
-              */}
               <Stack spacing={2.5}>
 
                 {/* ── Search Item ── */}
                 <Autocomplete
-                  options={itemOptions}
+                  options={allItems}
                   getOptionLabel={(o) => o.itemName}
-                  onInputChange={(_, val) => handleItemSearch(val)}
+                  /*
+                   * filterOptions: client-side normalization + relevance ranking.
+                   * Strips brackets/special chars from both the query and item names
+                   * before comparing, so "hmt bell s" matches "HMT BELL (S)".
+                   * Results sorted: exact → prefix → word-prefix → contains → all-words.
+                   */
+                  filterOptions={filterOptionsRef.current}
+                  /*
+                   * autoHighlight: the first (most relevant) option is pre-highlighted.
+                   * Pressing Enter in the search field selects that top option and
+                   * fires onChange → handleItemChange → focus moves to Qty.
+                   */
+                  autoHighlight
                   onChange={handleItemChange}
                   value={form.item}
-                  loading={searchLoading}
+                  loading={itemsLoading}
                   isOptionEqualToValue={(o, v) => o.id === v.id}
-                  filterOptions={(x) => x}
-                  noOptionsText="Type to search items…"
+                  noOptionsText={itemsLoading ? 'Loading items…' : 'No items found'}
                   renderInput={(params) => (
                     <TextField
                       {...params}
                       label="Search Item *"
-                      placeholder="Type item name, press Enter to select…"
+                      placeholder={itemsLoading ? 'Loading…' : 'Type item name (brackets ignored)…'}
                       inputProps={{
                         ...params.inputProps,
-                        id: IDS.item,  // for focusField(IDS.item) after save
+                        id: IDS.item,  // used by focusField after save
                       }}
                       InputProps={{
                         ...params.InputProps,
@@ -311,7 +369,7 @@ export default function SalesPage() {
                         ),
                         endAdornment: (
                           <>
-                            {searchLoading ? <CircularProgress size={16} /> : null}
+                            {itemsLoading ? <CircularProgress size={16} /> : null}
                             {params.InputProps.endAdornment}
                           </>
                         ),
@@ -321,6 +379,7 @@ export default function SalesPage() {
                   renderOption={(props, option) => (
                     <Box component="li" {...props} key={option.id}>
                       <Box>
+                        {/* Display name is ALWAYS the original — never the normalized version */}
                         <Typography variant="body2" fontWeight={600}>{option.itemName}</Typography>
                         <Typography variant="caption" color="text.secondary">{option.category}</Typography>
                       </Box>
@@ -328,7 +387,7 @@ export default function SalesPage() {
                   )}
                 />
 
-                {/* ── Quantity + Total Price ── */}
+                {/* ── Quantity + Price ── */}
                 <Grid container spacing={2}>
                   <Grid item xs={6}>
                     <TextField
@@ -339,7 +398,7 @@ export default function SalesPage() {
                       placeholder="e.g. 26"
                       inputProps={{ step: '0.001', min: '0.001', id: IDS.qty }}
                       onChange={(e) => setForm(f => ({ ...f, quantityKg: e.target.value }))}
-                      onKeyDown={handleQtyKeyDown}   // Enter → move to Price
+                      onKeyDown={handleQtyKeyDown}
                       InputProps={{
                         endAdornment: (
                           <InputAdornment position="end">
@@ -359,7 +418,7 @@ export default function SalesPage() {
                       placeholder="e.g. 1500"
                       inputProps={{ step: '0.01', min: '0.01', id: IDS.price }}
                       onChange={(e) => setForm(f => ({ ...f, totalPrice: e.target.value }))}
-                      onKeyDown={handlePriceKeyDown}  // Enter → Save
+                      onKeyDown={handlePriceKeyDown}
                       InputProps={{ startAdornment: <InputAdornment position="start">₹</InputAdornment> }}
                       helperText="Enter → Save sale"
                     />
@@ -376,7 +435,7 @@ export default function SalesPage() {
                   InputLabelProps={{ shrink: true }}
                 />
 
-                {/* ── Total Amount display ── */}
+                {/* ── Total Amount ── */}
                 <Box sx={{
                   p: 2.5, borderRadius: 3, textAlign: 'center', color: 'white',
                   background: editId
@@ -400,14 +459,14 @@ export default function SalesPage() {
                   )}
                 </Box>
 
-                {/* ── Action Buttons ── */}
+                {/* ── Buttons ── */}
                 <Stack spacing={1}>
                   <Button
                     variant="contained"
                     size="large"
                     fullWidth
                     disabled={saving}
-                    onClick={triggerSave}       // same function as Price field Enter
+                    onClick={triggerSave}
                     startIcon={saving ? <CircularProgress size={20} color="inherit" /> : (editId ? <Save /> : <Add />)}
                     sx={{
                       py: 1.6, fontSize: '1rem', fontWeight: 700, borderRadius: 2,
@@ -423,13 +482,8 @@ export default function SalesPage() {
                   </Button>
 
                   {editId && (
-                    <Button
-                      variant="outlined"
-                      fullWidth
-                      startIcon={<Cancel />}
-                      onClick={handleCancelEdit}
-                      color="inherit"
-                    >
+                    <Button variant="outlined" fullWidth startIcon={<Cancel />}
+                      onClick={handleCancelEdit} color="inherit">
                       Cancel Edit
                     </Button>
                   )}
@@ -440,12 +494,12 @@ export default function SalesPage() {
           </Card>
         </Grid>
 
-        {/* ══════════════════ RIGHT: Sales Table ══════════════════ */}
+        {/* ══════════ RIGHT: Sales Table ══════════ */}
         <Grid item xs={12} md={7}>
           <Card sx={{ height: '100%' }}>
             <CardContent sx={{ p: 3 }}>
 
-              {/* ── Date Picker Row ── */}
+              {/* Date picker */}
               <Box sx={{
                 display: 'flex', alignItems: 'center', gap: 2, mb: 2.5, p: 2,
                 borderRadius: 2, bgcolor: 'action.hover', flexWrap: 'wrap',
@@ -455,20 +509,18 @@ export default function SalesPage() {
                 <TextField
                   type="date" size="small" value={selectedDate}
                   onChange={handleDateChange}
-                  InputLabelProps={{ shrink: true }}
-                  sx={{ width: 165 }}
+                  InputLabelProps={{ shrink: true }} sx={{ width: 165 }}
                 />
                 {!isToday && (
                   <Button size="small" variant="outlined"
                     onClick={() => setSelectedDate(dayjs().format('YYYY-MM-DD'))}
-                    sx={{ whiteSpace: 'nowrap' }}
-                  >
+                    sx={{ whiteSpace: 'nowrap' }}>
                     Go to Today
                   </Button>
                 )}
               </Box>
 
-              {/* ── Summary Stats ── */}
+              {/* Stats */}
               <Grid container spacing={1.5} sx={{ mb: 2 }}>
                 {[
                   { label: 'Revenue', value: fmt(totalRevenue),  icon: <TrendingUp fontSize="small" />, color: '#22c55e', bg: 'rgba(34,197,94,0.08)'  },
@@ -483,9 +535,7 @@ export default function SalesPage() {
                     }}>
                       <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, color: stat.color }}>
                         {stat.icon}
-                        <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>
-                          {stat.label}
-                        </Typography>
+                        <Typography variant="caption" sx={{ color: 'text.secondary', fontWeight: 600 }}>{stat.label}</Typography>
                       </Box>
                       <Typography variant="subtitle2" fontWeight={800} sx={{ color: stat.color, fontSize: '0.85rem' }}>
                         {salesLoading ? '—' : stat.value}
@@ -495,19 +545,16 @@ export default function SalesPage() {
                 ))}
               </Grid>
 
-              {/* ── Table Header ── */}
+              {/* Table */}
               <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 1 }}>
                 <Typography variant="subtitle1" fontWeight={700}>
                   {isToday ? "Today's Sales" : `Sales on ${fmtDateDisplay(selectedDate)}`}
                 </Typography>
                 <Button size="small" startIcon={<Refresh />} onClick={handleRefresh}
-                  variant="outlined" disabled={salesLoading}>
-                  Refresh
-                </Button>
+                  variant="outlined" disabled={salesLoading}>Refresh</Button>
               </Box>
               <Divider sx={{ mb: 1.5 }} />
 
-              {/* ── Table ── */}
               <TableContainer sx={{ maxHeight: 430 }}>
                 <Table size="small" stickyHeader>
                   <TableHead>
@@ -543,14 +590,11 @@ export default function SalesPage() {
                       </TableRow>
                     ) : (
                       sales.map((s, i) => (
-                        <TableRow
-                          key={s.id} hover
-                          sx={{
-                            bgcolor: editId === s.id ? 'warning.light' : 'inherit',
-                            opacity: editId && editId !== s.id ? 0.55 : 1,
-                            transition: 'opacity 0.2s, background 0.2s',
-                          }}
-                        >
+                        <TableRow key={s.id} hover sx={{
+                          bgcolor: editId === s.id ? 'warning.light' : 'inherit',
+                          opacity: editId && editId !== s.id ? 0.55 : 1,
+                          transition: 'opacity 0.2s, background 0.2s',
+                        }}>
                           <TableCell sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>{i + 1}</TableCell>
                           <TableCell>
                             <Typography variant="body2" fontWeight={600}>{s.itemName}</Typography>
@@ -577,7 +621,8 @@ export default function SalesPage() {
                                 </IconButton>
                               </Tooltip>
                               <Tooltip title="Delete sale">
-                                <IconButton size="small" color="error" onClick={() => openDelete(s)}
+                                <IconButton size="small" color="error"
+                                  onClick={() => setDeleteDialog({ open: true, id: s.id, name: s.itemName })}
                                   disabled={!!editId}>
                                   <Delete fontSize="small" />
                                 </IconButton>
@@ -596,7 +641,7 @@ export default function SalesPage() {
         </Grid>
       </Grid>
 
-      {/* ══ Delete Confirmation Dialog ══ */}
+      {/* Delete dialog */}
       <Dialog
         open={deleteDialog.open}
         onClose={() => setDeleteDialog({ open: false, id: null, name: '' })}
@@ -606,24 +651,14 @@ export default function SalesPage() {
           <Delete color="error" /> Delete Sale
         </DialogTitle>
         <DialogContent>
-          <Typography>
-            Delete sale for <strong>{deleteDialog.name}</strong>?
-          </Typography>
-          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
-            This action cannot be undone.
-          </Typography>
+          <Typography>Delete sale for <strong>{deleteDialog.name}</strong>?</Typography>
+          <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>This action cannot be undone.</Typography>
         </DialogContent>
         <DialogActions sx={{ p: 2, gap: 1 }}>
-          <Button
-            onClick={() => setDeleteDialog({ open: false, id: null, name: '' })}
-            variant="outlined" disabled={deleting}
-          >
-            Cancel
-          </Button>
-          <Button
-            onClick={confirmDelete} variant="contained" color="error" disabled={deleting}
-            startIcon={deleting ? <CircularProgress size={16} color="inherit" /> : <Delete />}
-          >
+          <Button onClick={() => setDeleteDialog({ open: false, id: null, name: '' })}
+            variant="outlined" disabled={deleting}>Cancel</Button>
+          <Button onClick={confirmDelete} variant="contained" color="error" disabled={deleting}
+            startIcon={deleting ? <CircularProgress size={16} color="inherit" /> : <Delete />}>
             {deleting ? 'Deleting…' : 'Delete'}
           </Button>
         </DialogActions>
