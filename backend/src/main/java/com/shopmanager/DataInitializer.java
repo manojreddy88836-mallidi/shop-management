@@ -7,6 +7,10 @@ import com.shopmanager.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.CommandLineRunner;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
@@ -28,14 +32,23 @@ public class DataInitializer implements CommandLineRunner {
     private final UserRepository userRepository;
     private final ItemRepository itemRepository;
     private final PasswordEncoder passwordEncoder;
+    private final MongoTemplate mongoTemplate;   // for bulk-updating sale records on rename
 
     // ── Known renames: OLD name → NEW name ───────────────────────────────────
     // These are applied before any insert/deactivate logic.
+    // applyRenames() also updates all existing sale records with the old itemName.
     private static final Map<String, String> RENAMES = new LinkedHashMap<>();
     static {
-        RENAMES.put("10KG GM R/S",  "10KG-GM R/S");   // hyphen change
-        RENAMES.put("VUIAVALU",     "VUIAVAIU");        // spelling correction
-        RENAMES.put("HMT KA",       "HMT \u039A\u0391"); // Latin KA → Greek ΚΑ (as per master list)
+        RENAMES.put("10KG GM R/S",  "10KG-GM R/S");     // hyphen change
+        RENAMES.put("VUIAVALU",     "VUIAVAIU");          // spelling correction
+        RENAMES.put("HMT KA",       "HMT \u039A\u0391"); // Latin KA → Greek ΚΑ
+        // ── User-requested renames (Sep 2026) ────────────────────────────────
+        RENAMES.put("GM M (P)",     "GM P");
+        RENAMES.put("GM M (S)",     "GM S");
+        RENAMES.put("HMT (M) P",    "HMT P");
+        RENAMES.put("HMT (M)S",     "HMT S");
+        RENAMES.put("Paddy",        "D");
+        RENAMES.put("M Jona Potu",  "M J P");
     }
 
     // ── Master Item List ──────────────────────────────────────────────────────
@@ -97,8 +110,8 @@ public class DataInitializer implements CommandLineRunner {
         { "GM KA (S)",           "RICE"     },
         { "GM LA",               "RICE"     },
         { "GM MILL",             "RICE"     },
-        { "GM M (P)",            "RICE"     },
-        { "GM M (S)",            "RICE"     },
+        { "GM P",               "RICE"     },
+        { "GM S",               "RICE"     },
         { "GM MSR",              "RICE"     },
         { "GM MSR (OLD)",        "RICE"     },
         { "GM PRINCE (K)",       "RICE"     },
@@ -118,8 +131,8 @@ public class DataInitializer implements CommandLineRunner {
         { "HMT \u039A\u0391",    "RICE"     },   // HMT ΚΑ
         { "HMT KA (S)",          "RICE"     },
         { "HMT LA",              "RICE"     },
-        { "HMT (M) P",           "RICE"     },
-        { "HMT (M)S",            "RICE"     },
+        { "HMT P",               "RICE"     },
+        { "HMT S",               "RICE"     },
         { "HMT T/B",             "RICE"     },
         { "HMT T/B (S)",         "RICE"     },
         // ── I / J / K ────────────────────────────────────────────────────────
@@ -138,7 +151,7 @@ public class DataInitializer implements CommandLineRunner {
         { "Mix",                 "RICE"     },
         { "Mixing",              "RICE"     },
         { "MJN",                 "RICE"     },
-        { "M Jona Potu",         "RICE"     },
+        { "M J P",               "RICE"     },
         { "MP",                  "RICE"     },
         { "MPTU",                "RICE"     },
         // ── N variants ───────────────────────────────────────────────────────
@@ -148,7 +161,7 @@ public class DataInitializer implements CommandLineRunner {
         { "NM",                  "RICE"     },
         // ── P variants ───────────────────────────────────────────────────────
         { "P",                   "RICE"     },
-        { "Paddy",               "PADDY"    },
+        { "D",                   "PADDY"    },
         { "Paddy(Sw)Old",        "PADDY"    },
         { "Paru",                "RICE"     },
         { "PL (M)",              "RICE"     },
@@ -200,10 +213,12 @@ public class DataInitializer implements CommandLineRunner {
 
     public DataInitializer(UserRepository userRepository,
                            ItemRepository itemRepository,
-                           PasswordEncoder passwordEncoder) {
+                           PasswordEncoder passwordEncoder,
+                           MongoTemplate mongoTemplate) {
         this.userRepository = userRepository;
         this.itemRepository = itemRepository;
         this.passwordEncoder = passwordEncoder;
+        this.mongoTemplate   = mongoTemplate;
     }
 
     @Override
@@ -262,7 +277,8 @@ public class DataInitializer implements CommandLineRunner {
 
     /**
      * Apply known renames (old name → new name).
-     * Only updates if the old name exists AND the new name doesn't.
+     * Updates the item document AND all existing sale records that stored
+     * the old itemName (denormalised field in sales collection).
      */
     private int applyRenames() {
         int count = 0;
@@ -271,9 +287,16 @@ public class DataInitializer implements CommandLineRunner {
             String newName = entry.getValue();
             Optional<Item> existing = itemRepository.findByItemNameIgnoreCase(oldName);
             if (existing.isPresent() && itemRepository.findByItemNameIgnoreCase(newName).isEmpty()) {
+                // 1. Rename the item document
                 existing.get().setItemName(newName);
                 itemRepository.save(existing.get());
-                log.info("  ↔ Renamed: '{}' → '{}'", oldName, newName);
+
+                // 2. Update all sale records that stored the old item name
+                Query saleQuery = new Query(Criteria.where("itemName").is(oldName));
+                Update saleUpdate = new Update().set("itemName", newName);
+                long salesUpdated = mongoTemplate.updateMulti(saleQuery, saleUpdate, "sales").getModifiedCount();
+
+                log.info("  ↔ Renamed item: '{}' → '{}' | sales updated: {}", oldName, newName, salesUpdated);
                 count++;
             }
         }
