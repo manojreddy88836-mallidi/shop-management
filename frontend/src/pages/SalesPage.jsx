@@ -590,7 +590,10 @@ export default function SalesPage() {
                         </TableCell>
                       </TableRow>
                     ) : (
-                      sales.map((s, i) => (
+                      // Reverse so latest entry is #1 at the top.
+                      // [...sales] creates a copy — original state is not mutated.
+                      // Summary cards (Revenue/KG/Records) still use unmodified sales[].
+                      [...sales].reverse().map((s, i) => (
                         <TableRow key={s.id} hover sx={{
                           bgcolor: editId === s.id ? 'warning.light' : 'inherit',
                           opacity: editId && editId !== s.id ? 0.55 : 1,
