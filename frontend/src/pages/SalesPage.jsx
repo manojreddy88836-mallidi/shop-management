@@ -599,7 +599,7 @@ export default function SalesPage() {
                           opacity: editId && editId !== s.id ? 0.55 : 1,
                           transition: 'opacity 0.2s, background 0.2s',
                         }}>
-                          <TableCell sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>{i + 1}</TableCell>
+                          <TableCell sx={{ color: 'text.secondary', fontSize: '0.75rem' }}>{sales.length - i}</TableCell>
                           <TableCell>
                             <Typography variant="body2" fontWeight={600}>{s.itemName}</Typography>
                             <Typography variant="caption" color="text.secondary">{s.category}</Typography>
